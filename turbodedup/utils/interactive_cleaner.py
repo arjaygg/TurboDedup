@@ -455,18 +455,26 @@ class InteractiveCleaner:
         while True:
             self.display_group_summary(group, 0)
             
-            print(f"\nOptions:")
-            print(f"  a) Auto-select (keep newest)")
-            print(f"  n) Auto-select (keep newest)")  
-            print(f"  o) Auto-select (keep oldest)")
-            print(f"  p) Auto-select (keep in priority dirs)")
+            print(f"\n📋 AUTO-SELECTION STRATEGIES:")
+            print(f"  1) Keep [1] → DELETE files [2], [3], etc. (keep first file shown)")
+            print(f"  2) Keep [2] → DELETE files [1], [3], etc. (keep second file shown)")
+            if group.count > 2:
+                print(f"  3) Keep [3] → DELETE files [1], [2], etc. (keep third file shown)")
+            print(f"  p) Keep in priority → DELETE copies in less important locations")
+            print(f"      (Keeps files in Documents/Pictures/Desktop over Downloads/Temp)")
+            
             if self.enable_symlinks:
-                print(f"  l) Auto-symlink (keep newest as target)")
-                print(f"  lo) Auto-symlink (keep oldest as target)")
-                print(f"  lp) Auto-symlink (priority dirs as target)")
-            print(f"  m) Manual selection")
-            print(f"  s) Skip this group")
-            print(f"  q) Quit")
+                print(f"\n🔗 SYMLINK STRATEGIES (Zero data loss - files become shortcuts):")
+                print(f"  s1) Symlink to [1] → REPLACE other files with links to file [1]")
+                print(f"  s2) Symlink to [2] → REPLACE other files with links to file [2]")
+                if group.count > 2:
+                    print(f"  s3) Symlink to [3] → REPLACE other files with links to file [3]")
+                print(f"  sp) Symlink to priority → REPLACE copies with links to file in best location")
+            
+            print(f"\n⚙️ MANUAL OPTIONS:")
+            print(f"  m) Manual selection → Choose exactly which files to keep/delete/symlink")
+            print(f"  s) Skip this group → Leave all files unchanged")
+            print(f"  q) Quit → Exit the cleaner")
             
             choice = input("\nChoice: ").lower().strip()
             
@@ -476,25 +484,42 @@ class InteractiveCleaner:
                 group.selected_for_deletion.clear()
                 self.save_decision(group, 'skip')
                 return True
-            elif choice in ['a', 'n', 'auto', 'newest']:
-                group.auto_select_duplicates("keep_newest")
-                self.save_decision(group, 'auto_newest')
+            elif choice == '1':
+                # Keep file [1], delete all others
+                group.selected_for_deletion = set(range(1, group.count))
+                self.save_decision(group, 'keep_file_1')
                 return True
-            elif choice in ['o', 'oldest']:
-                group.auto_select_duplicates("keep_oldest")
-                self.save_decision(group, 'auto_oldest')
+            elif choice == '2':
+                # Keep file [2], delete all others
+                group.selected_for_deletion = set(i for i in range(group.count) if i != 1)
+                self.save_decision(group, 'keep_file_2')
+                return True
+            elif choice == '3' and group.count > 2:
+                # Keep file [3], delete all others
+                group.selected_for_deletion = set(i for i in range(group.count) if i != 2)
+                self.save_decision(group, 'keep_file_3')
                 return True
             elif choice in ['p', 'priority']:
                 group.auto_select_duplicates("keep_in_priority_dirs")
                 self.save_decision(group, 'auto_priority')
                 return True
-            elif choice in ['l', 'link', 'symlink'] and self.enable_symlinks:
-                group.auto_select_symlinks("keep_newest")
-                self.save_decision(group, 'symlink_newest')
+            elif choice == 's1' and self.enable_symlinks:
+                # Symlink to file [1], replace all others
+                group.symlink_target_index = 0
+                group.selected_for_symlink = set(range(1, group.count))
+                self.save_decision(group, 'symlink_to_file_1')
                 return True
-            elif choice in ['lo', 'link_oldest'] and self.enable_symlinks:
-                group.auto_select_symlinks("keep_oldest")
-                self.save_decision(group, 'symlink_oldest')
+            elif choice == 's2' and self.enable_symlinks:
+                # Symlink to file [2], replace all others
+                group.symlink_target_index = 1
+                group.selected_for_symlink = set(i for i in range(group.count) if i != 1)
+                self.save_decision(group, 'symlink_to_file_2')
+                return True
+            elif choice == 's3' and self.enable_symlinks and group.count > 2:
+                # Symlink to file [3], replace all others
+                group.symlink_target_index = 2
+                group.selected_for_symlink = set(i for i in range(group.count) if i != 2)
+                self.save_decision(group, 'symlink_to_file_3')
                 return True
             elif choice in ['lp', 'link_priority'] and self.enable_symlinks:
                 group.auto_select_symlinks("keep_in_priority_dirs")
@@ -904,6 +929,16 @@ class InteractiveCleaner:
         print(f"Found {total_groups} duplicate groups")
         print(f"Total wasted space: {self.format_size(total_wasted)}")
         print(f"Mode: {'DRY RUN (safe preview)' if self.dry_run else 'LIVE MODE (will delete files)'}")
+        
+        print(f"\n💡 HOW THE OPTIONS WORK:")
+        print(f"   • 'Keep [1]' → Deletes files [2], [3], etc., keeps first file shown")
+        print(f"   • 'Keep [2]' → Deletes files [1], [3], etc., keeps second file shown")
+        print(f"   • 'Keep priority' → Keeps files in Documents/Pictures, deletes Downloads/Temp copies")
+        if self.enable_symlinks:
+            print(f"   • 'Symlink to [1]' → Replaces other files with shortcuts to file [1] (100% safe)")
+        print(f"   • 'Manual' → You choose exactly which files to keep/delete")
+        print(f"   • 'Skip' → Leaves all files unchanged")
+        print(f"\n🔍 TIP: Look at file paths to decide which file to keep!")
         
         # Process each group interactively
         processed = 0

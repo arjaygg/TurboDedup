@@ -645,7 +645,7 @@ class Config:
     # Integrated Deletion System
     delete_duplicates: bool = True  # Always process duplicates by default
     delete_strategy: str = "interactive"  # Default to interactive mode
-    delete_dry_run: bool = True  # Safe by default
+    delete_dry_run: bool = False  # Default to live execution of recommendations
     delete_max_files: int = 1000
     delete_backup: bool = True
     delete_confirm: bool = True
@@ -1479,8 +1479,6 @@ class IntegratedDuplicateManager:
             self._select_keep_first(group)
         elif strategy == "keep_priority":
             self._select_keep_priority(group)
-        elif strategy == "keep_original":
-            self._select_keep_original(group)
         elif strategy == "keep_smart":
             self._select_keep_smart(group)
         elif strategy == "interactive":
@@ -1644,7 +1642,7 @@ class IntegratedDuplicateManager:
             recommendation = recommendation_engine.analyze_duplicate_group(group)
             
             # Display header with recommendation
-            print(f"\\n{'='*70}")
+            print(f"\n{'='*70}")
             print(f"Duplicate Group - SMART RECOMMENDATION")
             print(f"{'='*70}")
             print(f"Files: {group.count} copies | Size: {format_size(group.size)} each | Total wasted: {format_size(group.wasted_space)}")
@@ -1654,7 +1652,7 @@ class IntegratedDuplicateManager:
             confidence = recommendation['confidence']
             reasoning = recommendation['reasoning']
             
-            print(f"\\n🎯 RECOMMENDED: Keep [{best_file['index']+1}] (Confidence: {confidence:.0f}%)")
+            print(f"\n🎯 RECOMMENDED: Keep [{best_file['index']+1}] (Confidence: {confidence:.0f}%)")
             print(f"   Reason: {reasoning}")
             
             # Add symlink safety analysis if enabled
@@ -1663,7 +1661,7 @@ class IntegratedDuplicateManager:
                 strategy_icon = "🔗" if safety_analysis['recommended_strategy'] == 'symlink' else "🗑️"
                 strategy_name = "SYMLINK" if safety_analysis['recommended_strategy'] == 'symlink' else "DELETE"
                 
-                print(f"\\n{strategy_icon} SAFETY RECOMMENDATION: {strategy_name} duplicates (Confidence: {safety_analysis['confidence']:.0f}%)")
+                print(f"\n{strategy_icon} SAFETY RECOMMENDATION: {strategy_name} duplicates (Confidence: {safety_analysis['confidence']:.0f}%)")
                 if safety_analysis['reasoning']:
                     print(f"   Safety reason: {safety_analysis['reasoning'][0]}")
             
@@ -1721,7 +1719,7 @@ class IntegratedDuplicateManager:
         except Exception as e:
             # Fallback to basic display if smart recommendation fails
             logger.warning(f"Smart recommendation failed: {e}")
-            print(f"\\n{'='*60}")
+            print(f"\n{'='*60}")
             print(f"Duplicate Group")
             print(f"{'='*60}")
             print(f"Files: {group.count} copies")
@@ -1749,15 +1747,18 @@ class IntegratedDuplicateManager:
             except:
                 pass
             
-            print(f"  ⚙️  n) Keep newest (auto-select)")
-            print(f"  ⚙️  o) Keep oldest (auto-select)")
+            print(f"  ⚙️  1) Keep [1]")
+            print(f"  ⚙️  2) Keep [2]")
+            if len(group.paths) > 2:
+                print(f"  ⚙️  3) Keep [3]")
             print(f"  ⚙️  p) Keep in priority dirs (auto-select)")
-            print(f"  ⚙️  t) Keep original pattern (auto-select)")
+            print(f"  🔗 sl) Force symlinks (keep recommended file as target)")
+            print(f"  🗑️  dl) Force deletion (delete duplicates, keep recommended file)")
             print(f"  ✋ m) Manual selection")
             print(f"  ⏭️  k) Skip this group")
             print(f"  🚪 q) Quit")
             
-            choice = input("\\nChoice: ").lower().strip()
+            choice = input("\nChoice: ").lower().strip()
             
             if choice == 'q':
                 sys.exit(0)
@@ -1767,31 +1768,124 @@ class IntegratedDuplicateManager:
             elif choice == 'a' and 'recommendation' in locals():
                 # Accept smart recommendation
                 keep_idx = best_file['index']
-                group.selected_for_deletion = {i for i in range(group.count) if i != keep_idx}
-                print(f"    Smart recommendation accepted. Keeping [{keep_idx+1}]")
+                
+                # Check if symlinks were recommended and enabled
+                if (self.config.enable_symlinks and 
+                    'safety_analysis' in locals() and 
+                    safety_analysis['recommended_strategy'] == 'symlink' and 
+                    safety_analysis['confidence'] > 70.0):
+                    
+                    # Set up symlink replacement
+                    group.symlink_target_index = keep_idx
+                    group.selected_for_symlink = {i for i in range(group.count) if i != keep_idx}
+                    group.selected_for_deletion.clear()
+                    print(f"    🔗 Smart symlink recommendation accepted. Target: [{keep_idx+1}]")
+                else:
+                    # Set up deletion
+                    group.selected_for_deletion = {i for i in range(group.count) if i != keep_idx}
+                    group.selected_for_symlink.clear()
+                    group.symlink_target_index = None
+                    print(f"    🗑️ Smart deletion recommendation accepted. Keeping [{keep_idx+1}]")
                 break
             elif choice == 'r' and 'recommendation' in locals() and len(recommendation['alternative_suggestions']) > 0:
                 # Use alternative recommendation
                 alt = recommendation['alternative_suggestions'][0]
                 keep_idx = alt['index']
-                group.selected_for_deletion = {i for i in range(group.count) if i != keep_idx}
-                print(f"    Alternative choice accepted. Keeping [{keep_idx+1}]")
+                
+                # Check if symlinks were recommended and enabled
+                if (self.config.enable_symlinks and 
+                    'safety_analysis' in locals() and 
+                    safety_analysis['recommended_strategy'] == 'symlink' and 
+                    safety_analysis['confidence'] > 70.0):
+                    
+                    # Set up symlink replacement
+                    group.symlink_target_index = keep_idx
+                    group.selected_for_symlink = {i for i in range(group.count) if i != keep_idx}
+                    group.selected_for_deletion.clear()
+                    print(f"    🔗 Alternative symlink choice accepted. Target: [{keep_idx+1}]")
+                else:
+                    # Set up deletion
+                    group.selected_for_deletion = {i for i in range(group.count) if i != keep_idx}
+                    group.selected_for_symlink.clear()
+                    group.symlink_target_index = None
+                    print(f"    🗑️ Alternative deletion choice accepted. Keeping [{keep_idx+1}]")
                 break
             elif choice == 's' and 'recommendation' in locals():
                 # Show detailed scoring breakdown
                 self._show_detailed_scores(recommendation['all_scores'])
                 continue
-            elif choice == 'n':
-                self._select_keep_newest(group)
+            elif choice == '1':
+                # Keep file [1], use safety recommendation for strategy
+                keep_idx = 0
+                if ('safety_analysis' in locals() and 
+                    safety_analysis['recommended_strategy'] == 'symlink' and 
+                    safety_analysis['confidence'] > 70.0):
+                    group.symlink_target_index = keep_idx
+                    group.selected_for_symlink = set(i for i in range(len(group.paths)) if i != keep_idx)
+                    group.selected_for_deletion.clear()
+                    print(f"    🔗 Keep file [1] as target, symlink others")
+                else:
+                    group.selected_for_deletion = set(range(1, len(group.paths)))
+                    group.selected_for_symlink.clear()
+                    group.symlink_target_index = None
+                    print(f"    🗑️ Keep file [1], delete others")
                 break
-            elif choice == 'o':
-                self._select_keep_oldest(group)
+            elif choice == '2':
+                # Keep file [2], use safety recommendation for strategy
+                keep_idx = 1
+                if ('safety_analysis' in locals() and 
+                    safety_analysis['recommended_strategy'] == 'symlink' and 
+                    safety_analysis['confidence'] > 70.0):
+                    group.symlink_target_index = keep_idx
+                    group.selected_for_symlink = set(i for i in range(len(group.paths)) if i != keep_idx)
+                    group.selected_for_deletion.clear()
+                    print(f"    🔗 Keep file [2] as target, symlink others")
+                else:
+                    group.selected_for_deletion = set(i for i in range(len(group.paths)) if i != 1)
+                    group.selected_for_symlink.clear()
+                    group.symlink_target_index = None
+                    print(f"    🗑️ Keep file [2], delete others")
+                break
+            elif choice == '3' and len(group.paths) > 2:
+                # Keep file [3], use safety recommendation for strategy
+                keep_idx = 2
+                if ('safety_analysis' in locals() and 
+                    safety_analysis['recommended_strategy'] == 'symlink' and 
+                    safety_analysis['confidence'] > 70.0):
+                    group.symlink_target_index = keep_idx
+                    group.selected_for_symlink = set(i for i in range(len(group.paths)) if i != keep_idx)
+                    group.selected_for_deletion.clear()
+                    print(f"    🔗 Keep file [3] as target, symlink others")
+                else:
+                    group.selected_for_deletion = set(i for i in range(len(group.paths)) if i != 2)
+                    group.selected_for_symlink.clear()
+                    group.symlink_target_index = None
+                    print(f"    🗑️ Keep file [3], delete others")
                 break
             elif choice == 'p':
                 self._select_keep_priority(group)
                 break
-            elif choice == 't':
-                self._select_keep_original(group)
+            elif choice == 'sl':
+                # Force symlinks with recommended file as target
+                if 'recommendation' in locals():
+                    keep_idx = best_file['index']
+                    group.symlink_target_index = keep_idx
+                    group.selected_for_symlink = {i for i in range(len(group.paths)) if i != keep_idx}
+                    group.selected_for_deletion.clear()
+                    print(f"    🔗 Forced symlinks. Target: [{keep_idx+1}]")
+                else:
+                    print(f"    Error: No recommendation available for symlink forcing")
+                break
+            elif choice == 'dl':
+                # Force deletion with recommended file kept
+                if 'recommendation' in locals():
+                    keep_idx = best_file['index']
+                    group.selected_for_deletion = {i for i in range(len(group.paths)) if i != keep_idx}
+                    group.selected_for_symlink.clear()
+                    group.symlink_target_index = None
+                    print(f"    🗑️ Forced deletion. Keeping: [{keep_idx+1}]")
+                else:
+                    print(f"    Error: No recommendation available for deletion forcing")
                 break
             elif choice == 'm':
                 if self._manual_selection(group):
@@ -1801,7 +1895,7 @@ class IntegratedDuplicateManager:
     
     def _show_detailed_scores(self, scored_files: List[Dict]) -> None:
         """Show detailed scoring breakdown for each file"""
-        print(f"\\n{'='*70}")
+        print(f"\n{'='*70}")
         print(f"DETAILED SCORING BREAKDOWN")
         print(f"{'='*70}")
         
@@ -1809,7 +1903,7 @@ class IntegratedDuplicateManager:
             path = file_data['path']
             score = file_data['score']
             
-            print(f"\\n[{file_data['index']+1}] {path.name}")
+            print(f"\n[{file_data['index']+1}] {path.name}")
             print(f"    Path: {path}")
             print(f"    Total Score: {score.total_score:.1f}/100")
             print(f"    ├─ Path Quality: {score.path_quality:.1f}/100 (weight: 40%)")
@@ -1822,21 +1916,21 @@ class IntegratedDuplicateManager:
                 for reason in score.reasoning[:5]:  # Show top 5 reasons
                     print(f"      • {reason}")
         
-        input("\\nPress Enter to continue...")
+        input("\nPress Enter to continue...")
     
     def _manual_selection(self, group: DuplicateGroup) -> bool:
         """Manual file selection within a group"""
         group.selected_for_deletion.clear()
         
         while True:
-            print(f"\\nManual Selection:")
+            print(f"\nManual Selection:")
             print(f"  Enter file numbers to DELETE (e.g., 1,3,4)")
             print(f"  'all' to select all but first")
             print(f"  'none' to clear selection")
             print(f"  'done' to finish")
             print(f"  'back' to return to auto options")
             
-            choice = input("\\nSelect files to DELETE: ").lower().strip()
+            choice = input("\nSelect files to DELETE: ").lower().strip()
             
             if choice == 'back':
                 return False
@@ -1873,13 +1967,13 @@ class IntegratedDuplicateManager:
                 except ValueError:
                     print("Invalid input. Use numbers separated by commas.")
     
-    def execute_deletions(self, groups: List[DuplicateGroup]) -> bool:
+    def execute_deletions(self, groups: List[DuplicateGroup], skip_confirmation: bool = False) -> bool:
         """Execute planned deletions"""
         total_files = sum(len(g.selected_for_deletion) for g in groups)
         total_savings = sum(g.potential_savings for g in groups)
         
         if total_files == 0:
-            print("\\nNo files selected for deletion.")
+            print("\nNo files selected for deletion.")
             return True
         
         if total_files > self.config.delete_max_files:
@@ -1887,15 +1981,15 @@ class IntegratedDuplicateManager:
             return False
         
         # Show preview
-        print(f"\\n{'='*60}")
+        print(f"\n{'='*60}")
         print(f"DELETION {'PREVIEW' if self.config.delete_dry_run else 'EXECUTION'}")
         print(f"{'='*60}")
         print(f"Files to delete: {total_files}")
         print(f"Space to free: {format_size(total_savings)}")
         print(f"Mode: {'DRY RUN' if self.config.delete_dry_run else 'LIVE'}")
         
-        if self.config.delete_confirm and not self.config.delete_dry_run:
-            print(f"\\n⚠️  WARNING: About to delete {total_files} files!")
+        if not skip_confirmation and self.config.delete_confirm and not self.config.delete_dry_run:
+            print(f"\n⚠️  WARNING: About to delete {total_files} files!")
             confirm = input("Type 'DELETE' to confirm: ")
             if confirm != 'DELETE':
                 print("Deletion cancelled.")
@@ -1936,7 +2030,7 @@ class IntegratedDuplicateManager:
                     print(f"  ERROR: {error_msg}")
         
         # Summary
-        print(f"\\n{'='*60}")
+        print(f"\n{'='*60}")
         print(f"DELETION SUMMARY")
         print(f"{'='*60}")
         print(f"Files processed: {deleted_count}")
@@ -1949,7 +2043,64 @@ class IntegratedDuplicateManager:
         
         return len(errors) == 0
     
-    def execute_symlinks(self, groups: List[DuplicateGroup]) -> bool:
+    def execute_mixed_operations(self, deletion_groups: List[DuplicateGroup], symlink_groups: List[DuplicateGroup]) -> bool:
+        """Execute both deletion and symlink operations with unified confirmation"""
+        total_deletions = sum(len(g.selected_for_deletion) for g in deletion_groups)
+        total_symlinks = sum(len(g.selected_for_symlink) for g in symlink_groups)
+        
+        if total_deletions == 0 and total_symlinks == 0:
+            print("\nNo operations selected.")
+            return True
+        
+        # Calculate savings
+        deletion_savings = sum(g.potential_savings for g in deletion_groups)
+        symlink_savings = sum(g.potential_symlink_savings for g in symlink_groups)
+        total_savings = deletion_savings + symlink_savings
+        
+        # Show unified preview
+        print(f"\n{'='*60}")
+        if total_deletions > 0 and total_symlinks > 0:
+            print(f"MIXED OPERATIONS {'PREVIEW' if self.config.delete_dry_run else 'EXECUTION'}")
+        elif total_symlinks > 0:
+            print(f"SYMLINK {'PREVIEW' if self.config.delete_dry_run else 'EXECUTION'}")
+        else:
+            print(f"DELETION {'PREVIEW' if self.config.delete_dry_run else 'EXECUTION'}")
+        print(f"{'='*60}")
+        
+        if total_deletions > 0:
+            print(f"Files to delete: {total_deletions}")
+        if total_symlinks > 0:
+            print(f"Files to symlink: {total_symlinks}")
+        print(f"Space to save: {format_size(total_savings)}")
+        print(f"Mode: {'DRY RUN' if self.config.delete_dry_run else 'LIVE'}")
+        
+        # Unified confirmation
+        if self.config.delete_confirm and not self.config.delete_dry_run:
+            if total_deletions > 0 and total_symlinks > 0:
+                print(f"\n🔗 About to create {total_symlinks} symlinks and delete {total_deletions} files!")
+                confirm = input("Type 'EXECUTE' to confirm: ")
+            elif total_symlinks > 0:
+                print(f"\n🔗 About to create {total_symlinks} symlinks!")
+                confirm = input("Type 'SYMLINK' to confirm: ")
+            else:
+                print(f"\n⚠️  WARNING: About to delete {total_deletions} files!")
+                confirm = input("Type 'DELETE' to confirm: ")
+                
+            expected = 'EXECUTE' if (total_deletions > 0 and total_symlinks > 0) else ('SYMLINK' if total_symlinks > 0 else 'DELETE')
+            if confirm != expected:
+                print("Operation cancelled.")
+                return False
+        
+        # Execute operations
+        success = True
+        if deletion_groups:
+            success &= self.execute_deletions(deletion_groups, skip_confirmation=True)
+        if symlink_groups and self.config.enable_symlinks:
+            success &= self.execute_symlinks(symlink_groups, skip_confirmation=True)
+            
+        return success
+
+    def execute_symlinks(self, groups: List[DuplicateGroup], skip_confirmation: bool = False) -> bool:
         """Execute symlink replacement operations"""
         if not self.config.enable_symlinks or not self.symlink_manager:
             print("Error: Symlink operations not enabled or supported.")
@@ -1959,19 +2110,19 @@ class IntegratedDuplicateManager:
         total_savings = sum(g.potential_symlink_savings for g in groups)
         
         if total_symlinks == 0:
-            print("\\nNo files selected for symlink replacement.")
+            print("\nNo files selected for symlink replacement.")
             return True
         
         # Show preview
-        print(f"\\n{'='*60}")
+        print(f"\n{'='*60}")
         print(f"SYMLINK {'PREVIEW' if self.config.symlink_dry_run or self.config.delete_dry_run else 'EXECUTION'}")
         print(f"{'='*60}")
         print(f"Files to symlink: {total_symlinks}")
         print(f"Space to save: {format_size(total_savings)}")
         print(f"Mode: {'DRY RUN' if self.config.symlink_dry_run or self.config.delete_dry_run else 'LIVE'}")
         
-        if self.config.delete_confirm and not (self.config.symlink_dry_run or self.config.delete_dry_run):
-            print(f"\\n🔗 About to create {total_symlinks} symlinks!")
+        if not skip_confirmation and self.config.delete_confirm and not (self.config.symlink_dry_run or self.config.delete_dry_run):
+            print(f"\n🔗 About to create {total_symlinks} symlinks!")
             confirm = input("Type 'SYMLINK' to confirm: ")
             if confirm != 'SYMLINK':
                 print("Symlink operation cancelled.")
@@ -2028,7 +2179,7 @@ class IntegratedDuplicateManager:
                     print(f"  ERROR: {error_msg}")
         
         # Summary
-        print(f"\\n{'='*60}")
+        print(f"\n{'='*60}")
         print(f"SYMLINK SUMMARY")
         print(f"{'='*60}")
         print(f"Symlinks created: {symlink_count}")
@@ -2895,10 +3046,10 @@ def main():
     # Integrated Deletion System
     parser.add_argument("--no-delete", action="store_true", help="Disable integrated deletion (scan only)")
     parser.add_argument("--delete-strategy", 
-                       choices=["interactive", "keep_newest", "keep_oldest", "keep_first", "keep_priority", "keep_original", "keep_smart", "skip"],
+                       choices=["interactive", "keep_newest", "keep_oldest", "keep_first", "keep_priority", "keep_smart", "skip"],
                        default="interactive",
-                       help="Deletion strategy: interactive, keep_smart (AI), keep_newest, keep_oldest, keep_priority, keep_original, skip (default: interactive)")
-    parser.add_argument("--delete-live", action="store_true", help="Actually delete files (default is dry-run)")
+                       help="Deletion strategy: interactive, keep_smart (AI), keep_newest, keep_oldest, keep_priority, skip (default: interactive)")
+    parser.add_argument("--dry-run", action="store_true", help="Preview mode only - don't actually execute recommendations")
     parser.add_argument("--delete-max-files", type=int, default=1000, help="Max files to delete in one operation")
     parser.add_argument("--no-delete-backup", action="store_true", help="Skip backup when deleting")
     parser.add_argument("--no-delete-confirm", action="store_true", help="Skip confirmation prompts")
@@ -2910,7 +3061,6 @@ def main():
                        choices=["replace_duplicates", "hybrid", "large_files_only"],
                        default="replace_duplicates",
                        help="Symlink replacement strategy (default: replace_duplicates)")
-    parser.add_argument("--symlink-dry-run", action="store_true", help="Preview symlink operations without creating them")
     parser.add_argument("--rollback-symlinks", action="store_true", help="Rollback previous symlink operations")
     
     # Similarity Detection System
@@ -2982,7 +3132,7 @@ def main():
         # Integrated deletion system
         delete_duplicates=not args.no_delete,
         delete_strategy=args.delete_strategy,
-        delete_dry_run=not args.delete_live,
+        delete_dry_run=args.dry_run,
         delete_max_files=args.delete_max_files,
         delete_backup=not args.no_delete_backup,
         delete_confirm=not args.no_delete_confirm,
@@ -2991,7 +3141,7 @@ def main():
         enable_symlinks=args.enable_symlinks,
         prefer_symlinks=args.prefer_symlinks,
         symlink_strategy=args.symlink_strategy if hasattr(args, 'symlink_strategy') else "replace_duplicates",
-        symlink_dry_run=args.symlink_dry_run if hasattr(args, 'symlink_dry_run') else False,
+        symlink_dry_run=args.dry_run,
         rollback_symlinks=args.rollback_symlinks if hasattr(args, 'rollback_symlinks') else False,
         
         # Similarity detection system  
@@ -3146,13 +3296,9 @@ def main():
                     groups_with_deletions = [g for g in groups if g.selected_for_deletion]
                     groups_with_symlinks = [g for g in groups if hasattr(g, 'selected_for_symlink') and g.selected_for_symlink]
                     
-                    # Execute deletions first
-                    if groups_with_deletions:
-                        duplicate_manager.execute_deletions(groups_with_deletions)
-                    
-                    # Execute symlinks if enabled
-                    if groups_with_symlinks and config.enable_symlinks:
-                        duplicate_manager.execute_symlinks(groups_with_symlinks)
+                    # Execute operations with unified confirmation
+                    if groups_with_deletions or groups_with_symlinks:
+                        duplicate_manager.execute_mixed_operations(groups_with_deletions, groups_with_symlinks)
                 else:
                     print("No duplicate groups found.")
             except Exception as e:
