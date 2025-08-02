@@ -42,7 +42,7 @@ TurboDedup is the definitive file deduplication solution featuring intelligent t
 
 ### Basic Installation (No Dependencies)
 ```bash
-git clone https://github.com/yourusername/TurboDedup.git
+git clone https://github.com/arjaygg/TurboDedup.git
 cd TurboDedup
 python3 turbo_dedup.py --help
 ```
@@ -172,7 +172,7 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 
 ### Development Setup
 ```bash
-git clone https://github.com/yourusername/TurboDedup.git
+git clone https://github.com/arjaygg/TurboDedup.git
 cd TurboDedup
 pip install -r requirements_enhanced.txt
 python3 turbo_dedup.py --gpu-info  # Test installation
@@ -185,8 +185,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🔗 Links
 
 - **Documentation**: [Full Documentation](docs/)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/TurboDedup/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/TurboDedup/discussions)
+- **Issues**: [GitHub Issues](https://github.com/arjaygg/TurboDedup/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/arjaygg/TurboDedup/discussions)
 
 ## ⭐ Support
 
