@@ -22,6 +22,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+# Import SymlinkManager
+try:
+    from ..core.symlink_manager import SymlinkManager
+    SYMLINK_SUPPORT = True
+except ImportError:
+    SYMLINK_SUPPORT = False
+    SymlinkManager = None
+
 class DuplicateGroup:
     """Represents a group of duplicate files"""
     
@@ -30,7 +38,9 @@ class DuplicateGroup:
         self.hash = hash_val
         self.paths = [Path(p) for p in paths]
         self.selected_for_deletion: Set[int] = set()
+        self.selected_for_symlink: Set[int] = set()
         self.protected_indices: Set[int] = set()
+        self.symlink_target_index: Optional[int] = None
     
     @property
     def count(self) -> int:
@@ -43,6 +53,14 @@ class DuplicateGroup:
     @property
     def potential_savings(self) -> int:
         return self.size * len(self.selected_for_deletion)
+    
+    @property
+    def potential_symlink_savings(self) -> int:
+        return self.size * len(self.selected_for_symlink)
+    
+    @property
+    def total_potential_savings(self) -> int:
+        return self.size * (len(self.selected_for_deletion) + len(self.selected_for_symlink))
     
     def get_file_info(self, index: int) -> Dict:
         """Get detailed info about a specific file"""
@@ -122,16 +140,72 @@ class DuplicateGroup:
             else:
                 # Fallback to keep_newest if no priority files
                 self.auto_select_duplicates("keep_newest")
+    
+    def auto_select_symlinks(self, strategy: str = "keep_newest") -> None:
+        """Auto-select files for symlink replacement based on strategy"""
+        if self.count <= 1:
+            return
+        
+        file_infos = [(i, self.get_file_info(i)) for i in range(self.count)]
+        # Filter out non-existent files
+        valid_files = [(i, info) for i, info in file_infos if info['exists']]
+        
+        if len(valid_files) <= 1:
+            return
+        
+        # Choose target (same logic as deletion strategies)
+        if strategy == "keep_newest":
+            target_idx = max(valid_files, key=lambda x: x[1]['modified'] or datetime.min)[0]
+        elif strategy == "keep_oldest":
+            target_idx = min(valid_files, key=lambda x: x[1]['modified'] or datetime.max)[0]
+        elif strategy == "keep_first":
+            sorted_files = sorted(valid_files, key=lambda x: x[1]['path'])
+            target_idx = sorted_files[0][0]
+        elif strategy == "keep_in_priority_dirs":
+            priority_patterns = ['/Documents/', '/Desktop/', '/Pictures/', '/Videos/', 
+                               'Documents\\', 'Desktop\\', 'Pictures\\', 'Videos\\',
+                               'home/', 'Users/']
+            
+            priority_files = []
+            for i, info in valid_files:
+                path_str = info['path']
+                if any(pattern in path_str for pattern in priority_patterns):
+                    priority_files.append((i, info))
+            
+            if priority_files:
+                target_idx = max(priority_files, key=lambda x: x[1]['modified'] or datetime.min)[0]
+            else:
+                target_idx = max(valid_files, key=lambda x: x[1]['modified'] or datetime.min)[0]
+        else:
+            target_idx = max(valid_files, key=lambda x: x[1]['modified'] or datetime.min)[0]
+        
+        # Set target and select others for symlink replacement
+        self.symlink_target_index = target_idx
+        self.selected_for_symlink = {i for i, _ in valid_files if i != target_idx}
 
 class InteractiveCleaner:
     """Interactive duplicate file cleaner with human oversight"""
     
-    def __init__(self, db_path: str, dry_run: bool = True, auto_apply_saved: bool = False):
+    def __init__(self, db_path: str, dry_run: bool = True, auto_apply_saved: bool = False, 
+                 enable_symlinks: bool = False, prefer_symlinks: bool = False):
         self.db_path = db_path
         self.dry_run = dry_run
         self.auto_apply_saved = auto_apply_saved
+        self.enable_symlinks = enable_symlinks and SYMLINK_SUPPORT
+        self.prefer_symlinks = prefer_symlinks and self.enable_symlinks
         self.deleted_files: List[Tuple[str, str]] = []  # (original_path, backup_path)
         self.undo_log_path = f"deletion_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        
+        # Initialize symlink manager if enabled
+        self.symlink_manager = None
+        if self.enable_symlinks:
+            try:
+                symlink_log_path = Path(f"symlink_operations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+                self.symlink_manager = SymlinkManager(log_path=symlink_log_path, dry_run=dry_run)
+            except Exception as e:
+                print(f"Warning: Could not initialize symlink manager: {e}")
+                self.enable_symlinks = False
+                self.prefer_symlinks = False
         
         # Safety settings
         self.max_files_per_operation = 100
@@ -386,6 +460,10 @@ class InteractiveCleaner:
             print(f"  n) Auto-select (keep newest)")  
             print(f"  o) Auto-select (keep oldest)")
             print(f"  p) Auto-select (keep in priority dirs)")
+            if self.enable_symlinks:
+                print(f"  l) Auto-symlink (keep newest as target)")
+                print(f"  lo) Auto-symlink (keep oldest as target)")
+                print(f"  lp) Auto-symlink (priority dirs as target)")
             print(f"  m) Manual selection")
             print(f"  s) Skip this group")
             print(f"  q) Quit")
@@ -410,6 +488,18 @@ class InteractiveCleaner:
                 group.auto_select_duplicates("keep_in_priority_dirs")
                 self.save_decision(group, 'auto_priority')
                 return True
+            elif choice in ['l', 'link', 'symlink'] and self.enable_symlinks:
+                group.auto_select_symlinks("keep_newest")
+                self.save_decision(group, 'symlink_newest')
+                return True
+            elif choice in ['lo', 'link_oldest'] and self.enable_symlinks:
+                group.auto_select_symlinks("keep_oldest")
+                self.save_decision(group, 'symlink_oldest')
+                return True
+            elif choice in ['lp', 'link_priority'] and self.enable_symlinks:
+                group.auto_select_symlinks("keep_in_priority_dirs")
+                self.save_decision(group, 'symlink_priority')
+                return True
             elif choice in ['m', 'manual']:
                 if self.manual_selection(group):
                     # Save manual selection
@@ -422,85 +512,153 @@ class InteractiveCleaner:
     def manual_selection(self, group: DuplicateGroup) -> bool:
         """Manual file selection within a group"""
         group.selected_for_deletion.clear()
+        group.selected_for_symlink.clear()
+        group.symlink_target_index = None
+        
+        operation_mode = "delete"  # or "symlink"
         
         while True:
             self.display_group_summary(group, 0)
             
-            print(f"\nManual Selection:")
-            print(f"  Enter file numbers to DELETE (e.g., 1,3,4)")
-            print(f"  'all' to select all files")
-            print(f"  'none' to clear selection")
+            print(f"\nManual Selection (Mode: {operation_mode.upper()}):")
+            if operation_mode == "delete":
+                print(f"  Enter file numbers to DELETE (e.g., 1,3,4)")
+                print(f"  'all' to select all files")
+                print(f"  'none' to clear selection")
+                if self.enable_symlinks:
+                    print(f"  'symlink' to switch to symlink mode")
+            else:  # symlink mode
+                print(f"  First, select TARGET file (e.g., 1)")
+                print(f"  Then, select files to SYMLINK (e.g., 2,3,4)")
+                print(f"  'none' to clear selection")
+                print(f"  'delete' to switch to delete mode")
             print(f"  'done' to finish selection")
             print(f"  'back' to return to auto options")
             
-            choice = input("\nSelect files to DELETE: ").lower().strip()
+            if operation_mode == "delete":
+                choice = input("\nSelect files to DELETE: ").lower().strip()
+            else:
+                if group.symlink_target_index is None:
+                    choice = input("\nSelect TARGET file (1 number): ").lower().strip()
+                else:
+                    choice = input(f"\nTarget: {group.symlink_target_index + 1}. Select files to SYMLINK: ").lower().strip()
             
             if choice == 'back':
                 return False
             elif choice == 'done':
-                if not group.selected_for_deletion:
-                    print("No files selected for deletion.")
-                    continue
-                if len(group.selected_for_deletion) >= group.count:
-                    print("Error: Cannot delete all copies. At least one must remain.")
-                    continue
+                if operation_mode == "delete":
+                    if not group.selected_for_deletion:
+                        print("No files selected for deletion.")
+                        continue
+                    if len(group.selected_for_deletion) >= group.count:
+                        print("Error: Cannot delete all copies. At least one must remain.")
+                        continue
+                else:  # symlink mode
+                    if group.symlink_target_index is None or not group.selected_for_symlink:
+                        print("No files selected for symlink replacement.")
+                        continue
                 return True
-            elif choice == 'all':
+            elif choice == 'symlink' and self.enable_symlinks and operation_mode == "delete":
+                operation_mode = "symlink"
+                group.selected_for_deletion.clear()
+                continue
+            elif choice == 'delete' and operation_mode == "symlink":
+                operation_mode = "delete"
+                group.selected_for_symlink.clear()
+                group.symlink_target_index = None
+                continue
+            elif choice == 'all' and operation_mode == "delete":
                 # Select all but the first one
                 group.selected_for_deletion = set(range(1, group.count))
             elif choice == 'none':
-                group.selected_for_deletion.clear()
+                if operation_mode == "delete":
+                    group.selected_for_deletion.clear()
+                else:
+                    group.selected_for_symlink.clear()
+                    group.symlink_target_index = None
             else:
                 try:
-                    # Parse comma-separated numbers
-                    indices = []
-                    for part in choice.split(','):
-                        part = part.strip()
-                        if '-' in part:
-                            # Range like "2-4"
-                            start, end = map(int, part.split('-'))
-                            indices.extend(range(start-1, end))  # Convert to 0-based
+                    if operation_mode == "symlink" and group.symlink_target_index is None:
+                        # Selecting target for symlink
+                        target_idx = int(choice) - 1  # Convert to 0-based
+                        if 0 <= target_idx < group.count:
+                            group.symlink_target_index = target_idx
+                            print(f"Target selected: {group.paths[target_idx]}")
                         else:
-                            indices.append(int(part) - 1)  # Convert to 0-based
-                    
-                    # Validate indices
-                    valid_indices = set()
-                    for idx in indices:
-                        if 0 <= idx < group.count:
-                            valid_indices.add(idx)
-                        else:
-                            print(f"Warning: Index {idx+1} is out of range")
-                    
-                    if len(valid_indices) >= group.count:
-                        print("Error: Cannot delete all copies. At least one must remain.")
-                        continue
-                    
-                    group.selected_for_deletion = valid_indices
+                            print(f"Error: Index {target_idx + 1} is out of range")
+                    else:
+                        # Parse comma-separated numbers for deletion or symlink sources
+                        indices = []
+                        for part in choice.split(','):
+                            part = part.strip()
+                            if '-' in part:
+                                # Range like "2-4"
+                                start, end = map(int, part.split('-'))
+                                indices.extend(range(start-1, end))  # Convert to 0-based
+                            else:
+                                indices.append(int(part) - 1)  # Convert to 0-based
+                        
+                        # Validate indices
+                        valid_indices = set()
+                        for idx in indices:
+                            if 0 <= idx < group.count:
+                                valid_indices.add(idx)
+                            else:
+                                print(f"Warning: Index {idx+1} is out of range")
+                        
+                        if operation_mode == "delete":
+                            if len(valid_indices) >= group.count:
+                                print("Error: Cannot delete all copies. At least one must remain.")
+                                continue
+                            group.selected_for_deletion = valid_indices
+                        else:  # symlink mode
+                            # Remove target from symlink sources if accidentally selected
+                            if group.symlink_target_index in valid_indices:
+                                valid_indices.remove(group.symlink_target_index)
+                                print(f"Removed target file from symlink selection")
+                            group.selected_for_symlink = valid_indices
                     
                 except ValueError:
                     print("Invalid input. Use numbers separated by commas (e.g., 1,3,4)")
     
     def preview_deletions(self, groups: List[DuplicateGroup]) -> None:
-        """Preview all planned deletions"""
-        total_files = sum(len(g.selected_for_deletion) for g in groups)
-        total_savings = sum(g.potential_savings for g in groups)
+        """Preview all planned deletions and symlinks"""
+        total_deletions = sum(len(g.selected_for_deletion) for g in groups)
+        total_symlinks = sum(len(g.selected_for_symlink) for g in groups) if self.enable_symlinks else 0
+        deletion_savings = sum(g.potential_savings for g in groups)
+        symlink_savings = sum(g.potential_symlink_savings for g in groups) if self.enable_symlinks else 0
+        total_savings = deletion_savings + symlink_savings
         
         print(f"\n{'='*60}")
-        print(f"DELETION PREVIEW")
+        print(f"OPERATION PREVIEW")
         print(f"{'='*60}")
-        print(f"Files to delete: {total_files}")
-        print(f"Space to free: {self.format_size(total_savings)}")
-        print(f"Mode: {'DRY RUN (no files will be deleted)' if self.dry_run else 'LIVE MODE'}")
+        if total_deletions > 0:
+            print(f"Files to delete: {total_deletions}")
+        if total_symlinks > 0:
+            print(f"Files to symlink: {total_symlinks}")
+        print(f"Total space to free: {self.format_size(total_savings)}")
+        print(f"Mode: {'DRY RUN (no operations will be performed)' if self.dry_run else 'LIVE MODE'}")
         print()
         
         for i, group in enumerate(groups):
-            if group.selected_for_deletion:
-                print(f"Group #{i+1}: {len(group.selected_for_deletion)} files, "
-                      f"{self.format_size(group.potential_savings)} savings")
+            operations_in_group = bool(group.selected_for_deletion or group.selected_for_symlink)
+            if operations_in_group:
+                print(f"Group #{i+1}:")
                 
-                for idx in sorted(group.selected_for_deletion):
-                    info = group.get_file_info(idx)
-                    print(f"  DELETE: {info['path']}")
+                if group.selected_for_deletion:
+                    print(f"  DELETE: {len(group.selected_for_deletion)} files, "
+                          f"{self.format_size(group.potential_savings)} savings")
+                    for idx in sorted(group.selected_for_deletion):
+                        info = group.get_file_info(idx)
+                        print(f"    - {info['path']}")
+                
+                if group.selected_for_symlink and group.symlink_target_index is not None:
+                    target_info = group.get_file_info(group.symlink_target_index)
+                    print(f"  SYMLINK: {len(group.selected_for_symlink)} files -> {target_info['path']}")
+                    print(f"    Savings: {self.format_size(group.potential_symlink_savings)}")
+                    for idx in sorted(group.selected_for_symlink):
+                        info = group.get_file_info(idx)
+                        print(f"    - {info['path']} -> symlink")
     
     def execute_deletions(self, groups: List[DuplicateGroup]) -> bool:
         """Execute the planned deletions"""
@@ -606,6 +764,127 @@ class InteractiveCleaner:
         
         return len(errors) == 0
     
+    def execute_symlinks(self, groups: List[DuplicateGroup]) -> bool:
+        """Execute symlink replacement operations"""
+        if not self.enable_symlinks or not self.symlink_manager:
+            print("Error: Symlink operations not enabled or supported.")
+            return False
+        
+        total_symlinks = sum(len(g.selected_for_symlink) for g in groups)
+        
+        if total_symlinks == 0:
+            print("No files selected for symlink replacement.")
+            return True
+        
+        if total_symlinks > self.max_files_per_operation:
+            print(f"Error: Too many files selected ({total_symlinks}). "
+                  f"Maximum allowed: {self.max_files_per_operation}")
+            return False
+        
+        # Final confirmation
+        if not self.dry_run:
+            print(f"\n🔗 About to create {total_symlinks} symlinks!")
+            confirm = input("Type 'SYMLINK' to confirm: ")
+            if confirm != 'SYMLINK':
+                print("Symlink operation cancelled.")
+                return False
+        
+        operation_id = f"batch_{int(time.time())}"
+        symlink_count = 0
+        errors = []
+        
+        for group_idx, group in enumerate(groups):
+            if not group.selected_for_symlink or group.symlink_target_index is None:
+                continue
+                
+            print(f"\nProcessing symlink group #{group_idx + 1}...")
+            target_path = group.paths[group.symlink_target_index]
+            
+            # Verify target still exists
+            if not target_path.exists():
+                error_msg = f"Target file no longer exists: {target_path}"
+                errors.append(error_msg)
+                print(f"    ERROR: {error_msg}")
+                continue
+            
+            for file_idx in sorted(group.selected_for_symlink):
+                source_path = group.paths[file_idx]
+                
+                try:
+                    if self.dry_run:
+                        print(f"  [DRY RUN] Would create symlink: {source_path} -> {target_path}")
+                    else:
+                        print(f"  Creating symlink: {source_path} -> {target_path}")
+                        
+                        # Safety check
+                        if not source_path.exists():
+                            print(f"    Warning: Source file no longer exists")
+                            continue
+                        
+                        # Check compatibility
+                        compatible, reason = self.symlink_manager.check_compatibility(source_path, target_path)
+                        if not compatible:
+                            error_msg = f"Symlink incompatible for {source_path}: {reason}"
+                            errors.append(error_msg)
+                            print(f"    ERROR: {error_msg}")
+                            continue
+                        
+                        # Create the symlink
+                        operation = self.symlink_manager.create_symlink(
+                            source_path, target_path, operation_id
+                        )
+                        
+                        if not operation.success:
+                            error_msg = f"Failed to create symlink {source_path}: {operation.error_message}"
+                            errors.append(error_msg)
+                            print(f"    ERROR: {error_msg}")
+                            continue
+                    
+                    symlink_count += 1
+                    
+                except Exception as e:
+                    error_msg = f"Failed to create symlink {source_path}: {e}"
+                    errors.append(error_msg)
+                    print(f"    ERROR: {error_msg}")
+        
+        # Summary
+        print(f"\n{'='*60}")
+        print(f"SYMLINK SUMMARY")
+        print(f"{'='*60}")
+        print(f"Symlinks created: {symlink_count}")
+        print(f"Errors: {len(errors)}")
+        
+        if not self.dry_run and self.symlink_manager:
+            stats = self.symlink_manager.get_statistics()
+            print(f"Space saved: {self.format_size(stats['total_space_saved'])}")
+            print(f"Success rate: {stats['success_rate']:.1%}")
+            
+            if hasattr(self.symlink_manager, 'log_path'):
+                print(f"Operation log: {self.symlink_manager.log_path}")
+        
+        if errors:
+            print(f"\nErrors encountered:")
+            for error in errors:
+                print(f"  {error}")
+        
+        return len(errors) == 0
+    
+    def rollback_symlinks(self, operation_id: Optional[str] = None) -> bool:
+        """Rollback symlink operations"""
+        if not self.enable_symlinks or not self.symlink_manager:
+            print("Error: Symlink operations not enabled or supported.")
+            return False
+        
+        if not self.dry_run:
+            confirm = input("Are you sure you want to rollback symlinks? (y/N): ")
+            if confirm.lower() != 'y':
+                print("Rollback cancelled.")
+                return False
+        
+        rollback_count = self.symlink_manager.rollback_all_operations(operation_id)
+        print(f"Rolled back {rollback_count} symlink operations.")
+        return True
+    
     def run(self) -> None:
         """Main interactive cleaning workflow"""
         print("Interactive Duplicate Cleaner")
@@ -641,19 +920,40 @@ class InteractiveCleaner:
             return
         
         # Preview and execute
-        groups_with_selections = [g for g in groups if g.selected_for_deletion]
+        groups_with_deletions = [g for g in groups if g.selected_for_deletion]
+        groups_with_symlinks = [g for g in groups if g.selected_for_symlink] if self.enable_symlinks else []
+        groups_with_operations = [g for g in groups if g.selected_for_deletion or g.selected_for_symlink]
         
-        if not groups_with_selections:
-            print("No files selected for deletion.")
+        if not groups_with_operations:
+            print("No files selected for any operations.")
             return
         
-        self.preview_deletions(groups_with_selections)
+        self.preview_deletions(groups_with_operations)
         
-        print(f"\nReady to {'simulate' if self.dry_run else 'execute'} deletions.")
+        print(f"\nReady to {'simulate' if self.dry_run else 'execute'} operations.")
         proceed = input("Proceed? (y/n): ").lower().strip()
         
         if proceed == 'y':
-            self.execute_deletions(groups_with_selections)
+            success = True
+            
+            # Execute deletions first
+            if groups_with_deletions:
+                print(f"\n{'='*60}")
+                print("EXECUTING DELETIONS")
+                print(f"{'='*60}")
+                success &= self.execute_deletions(groups_with_deletions)
+            
+            # Then execute symlinks
+            if groups_with_symlinks and success:
+                print(f"\n{'='*60}")
+                print("EXECUTING SYMLINKS")
+                print(f"{'='*60}")
+                success &= self.execute_symlinks(groups_with_symlinks)
+            
+            if success:
+                print(f"\n✅ All operations completed successfully!")
+            else:
+                print(f"\n⚠️ Some operations failed. Check the logs for details.")
         else:
             print("Operation cancelled.")
 

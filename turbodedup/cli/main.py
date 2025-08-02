@@ -443,6 +443,170 @@ class SmartRecommendationEngine:
         
         return " | ".join(reasoning_parts)
 
+class SymlinkSafetyAnalyzer:
+    """Intelligent analysis system for symlink vs deletion recommendations"""
+    
+    def __init__(self):
+        # File types that are safer with symlinks (valuable/irreplaceable files)
+        self.symlink_preferred_types = {
+            # Media files (often irreplaceable)
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp',
+            '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v',
+            '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.wma',
+            '.psd', '.ai', '.svg', '.eps', '.indd',
+            
+            # Documents (often contain unique content)
+            '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+            '.odt', '.ods', '.odp', '.rtf',
+            
+            # Code and configuration (may have subtle differences)
+            '.py', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.cs',
+            '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg',
+            '.sql', '.md', '.txt', '.log',
+            
+            # Archives (deletion may be risky)
+            '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2',
+            
+            # Executables (may have different versions)
+            '.exe', '.msi', '.dmg', '.pkg', '.deb', '.rpm', '.appimage'
+        }
+        
+        # Patterns that indicate safe-to-delete temporary/cache files
+        self.deletion_safe_patterns = [
+            r'\.tmp$', r'\.temp$', r'\.cache$', r'\.bak$',
+            r'\.backup$', r'\.old$', r'\.orig$',
+            r'~$', r'\.swp$', r'\.swo$',
+            r'_copy\d*\.', r' - Copy\.', r' - Copy \(\d+\)\.',
+            r'Thumbs\.db$', r'\.DS_Store$',
+            r'desktop\.ini$'
+        ]
+        
+        # Directory patterns that suggest safer symlink use
+        self.symlink_safe_directories = [
+            r'/[Dd]ocuments?/', r'/[Pp]rojects?/', r'/[Ww]ork/',
+            r'/[Pp]hotos?/', r'/[Pp]ictures?/', r'/[Mm]usic/',
+            r'/[Vv]ideos?/', r'/[Dd]esktop/',
+            r'\\[Dd]ocuments?\\', r'\\[Pp]rojects?\\', r'\\[Ww]ork\\',
+            r'\\[Pp]hotos?\\', r'\\[Pp]ictures?\\', r'\\[Mm]usic\\',
+            r'\\[Vv]ideos?\\', r'\\[Dd]esktop\\'
+        ]
+        
+        # Directory patterns that suggest deletion is safer
+        self.deletion_safe_directories = [
+            r'/[Tt]emp/', r'/[Tt]mp/', r'/cache/', r'/logs?/',
+            r'\\[Tt]emp\\', r'\\[Tt]mp\\', r'\\cache\\', r'\\logs?\\',
+            r'node_modules/', r'\.git/', r'__pycache__/',
+            r'build/', r'dist/', r'target/'
+        ]
+    
+    def analyze_group_safety(self, group: 'DuplicateGroup') -> Dict:
+        """Analyze a duplicate group and recommend symlink vs deletion strategy"""
+        analysis = {
+            'recommended_strategy': 'deletion',  # default
+            'confidence': 50.0,
+            'reasoning': [],
+            'symlink_safety_score': 0.0,
+            'deletion_safety_score': 0.0,
+            'file_value_score': 0.0
+        }
+        
+        symlink_score = 0.0
+        deletion_score = 0.0
+        reasoning = []
+        
+        # Analyze each file in the group
+        for i, file_path in enumerate(group.paths):
+            file_analysis = self._analyze_file_safety(file_path)
+            symlink_score += file_analysis['symlink_score']
+            deletion_score += file_analysis['deletion_score']
+            if file_analysis['reasoning']:
+                reasoning.extend(file_analysis['reasoning'])
+        
+        # Normalize scores by group size
+        avg_symlink_score = symlink_score / len(group.paths)
+        avg_deletion_score = deletion_score / len(group.paths)
+        
+        # Calculate file value (larger files are generally more valuable)
+        size_gb = group.size / (1024 * 1024 * 1024)
+        if size_gb > 1.0:
+            file_value_bonus = min(20.0, size_gb * 5)
+            avg_symlink_score += file_value_bonus
+            reasoning.append(f"Large file value bonus: {size_gb:.1f}GB (+{file_value_bonus:.1f})")
+        
+        # Make recommendation
+        if avg_symlink_score > avg_deletion_score + 10:  # Prefer symlinks with confidence margin
+            analysis['recommended_strategy'] = 'symlink'
+            analysis['confidence'] = min(95.0, 50 + (avg_symlink_score - avg_deletion_score))
+            reasoning.insert(0, f"Symlink recommended (safety: {avg_symlink_score:.1f} vs deletion: {avg_deletion_score:.1f})")
+        else:
+            analysis['recommended_strategy'] = 'deletion'
+            analysis['confidence'] = min(95.0, 50 + (avg_deletion_score - avg_symlink_score))
+            reasoning.insert(0, f"Deletion recommended (safety: {avg_deletion_score:.1f} vs symlink: {avg_symlink_score:.1f})")
+        
+        analysis['symlink_safety_score'] = avg_symlink_score
+        analysis['deletion_safety_score'] = avg_deletion_score
+        analysis['file_value_score'] = size_gb
+        analysis['reasoning'] = reasoning[:5]  # Limit reasoning length
+        
+        return analysis
+    
+    def _analyze_file_safety(self, file_path: Path) -> Dict:
+        """Analyze individual file for symlink/deletion safety"""
+        symlink_score = 0.0
+        deletion_score = 0.0
+        reasoning = []
+        
+        path_str = str(file_path).replace('\\', '/')
+        filename = file_path.name.lower()
+        extension = file_path.suffix.lower()
+        
+        # Extension-based scoring
+        if extension in self.symlink_preferred_types:
+            symlink_score += 20.0
+            reasoning.append(f"Valuable file type: {extension}")
+        else:
+            deletion_score += 5.0
+        
+        # Filename pattern analysis
+        for pattern in self.deletion_safe_patterns:
+            if re.search(pattern, filename, re.IGNORECASE):
+                deletion_score += 25.0
+                reasoning.append(f"Temp/backup file pattern: {pattern}")
+                break
+        
+        # Directory-based scoring
+        for pattern in self.symlink_safe_directories:
+            if re.search(pattern, path_str, re.IGNORECASE):
+                symlink_score += 15.0
+                reasoning.append(f"User content directory")
+                break
+        
+        for pattern in self.deletion_safe_directories:
+            if re.search(pattern, path_str, re.IGNORECASE):
+                deletion_score += 20.0
+                reasoning.append(f"Temporary/cache directory")
+                break
+        
+        # Naming convention analysis
+        if re.search(r'copy|duplicate|backup', filename, re.IGNORECASE):
+            deletion_score += 15.0
+            reasoning.append("Copy/backup naming pattern")
+        
+        if re.search(r'original|master|main|final', filename, re.IGNORECASE):
+            symlink_score += 10.0
+            reasoning.append("Original/master file naming")
+        
+        # Version number detection
+        if re.search(r'v\d+|\d+\.\d+|_\d{4}', filename):
+            symlink_score += 8.0
+            reasoning.append("Versioned file (may have subtle differences)")
+        
+        return {
+            'symlink_score': symlink_score,
+            'deletion_score': deletion_score,
+            'reasoning': reasoning
+        }
+
 # ---------------------------
 # Configuration
 # ---------------------------
@@ -485,6 +649,14 @@ class Config:
     delete_max_files: int = 1000
     delete_backup: bool = True
     delete_confirm: bool = True
+    
+    # Symlink Replacement System
+    enable_symlinks: bool = False
+    prefer_symlinks: bool = False
+    symlink_strategy: str = "replace_duplicates"  # replace_duplicates, hybrid, large_files_only
+    symlink_dry_run: bool = False
+    rollback_symlinks: bool = False
+    symlink_min_size: int = 1024 * 1024  # 1MB - minimum size for symlink replacement
     
     # Similarity Detection System
     enable_similarity: bool = False
@@ -1214,6 +1386,8 @@ class DuplicateGroup:
     hash_val: str
     paths: List[Path]
     selected_for_deletion: Set[int] = field(default_factory=set)
+    selected_for_symlink: Set[int] = field(default_factory=set)
+    symlink_target_index: Optional[int] = None
     
     @property
     def count(self) -> int:
@@ -1226,6 +1400,14 @@ class DuplicateGroup:
     @property
     def potential_savings(self) -> int:
         return self.size * len(self.selected_for_deletion)
+    
+    @property
+    def potential_symlink_savings(self) -> int:
+        return self.size * len(self.selected_for_symlink)
+    
+    @property
+    def total_potential_savings(self) -> int:
+        return self.size * (len(self.selected_for_deletion) + len(self.selected_for_symlink))
     
     def get_file_info(self, index: int) -> Dict:
         """Get detailed info about a specific file"""
@@ -1249,7 +1431,7 @@ class DuplicateGroup:
             }
 
 class IntegratedDuplicateManager:
-    """Integrated duplicate detection and deletion manager"""
+    """Integrated duplicate detection, deletion, and symlink manager"""
     
     def __init__(self, config: Config, stats: ScanStats):
         self.config = config
@@ -1259,6 +1441,28 @@ class IntegratedDuplicateManager:
         
         if config.delete_backup:
             self.backup_dir.mkdir(exist_ok=True)
+        
+        # Initialize intelligent analysis systems
+        self.file_ranker = IntelligentFileRanker()
+        self.symlink_analyzer = SymlinkSafetyAnalyzer()
+        
+        # Initialize symlink manager if enabled
+        self.symlink_manager = None
+        if config.enable_symlinks:
+            try:
+                from ..core.symlink_manager import SymlinkManager
+                symlink_log_path = Path(f"symlink_operations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+                self.symlink_manager = SymlinkManager(
+                    log_path=symlink_log_path, 
+                    dry_run=config.symlink_dry_run or config.delete_dry_run
+                )
+                logger.info("Symlink manager initialized successfully")
+            except ImportError:
+                logger.warning("Symlink manager not available - symlink features disabled")
+                self.config.enable_symlinks = False
+            except Exception as e:
+                logger.error(f"Failed to initialize symlink manager: {e}")
+                self.config.enable_symlinks = False
     
     def apply_deletion_strategy(self, group: DuplicateGroup) -> None:
         """Apply deletion strategy to a group"""
@@ -1285,7 +1489,7 @@ class IntegratedDuplicateManager:
             group.selected_for_deletion.clear()
     
     def _select_keep_newest(self, group: DuplicateGroup) -> None:
-        """Keep the newest file, delete others"""
+        """Keep the newest file, delete or symlink others"""
         file_infos = [(i, group.get_file_info(i)) for i in range(group.count)]
         valid_files = [(i, info) for i, info in file_infos if info['exists']]
         
@@ -1293,7 +1497,15 @@ class IntegratedDuplicateManager:
             return
         
         newest_idx = max(valid_files, key=lambda x: x[1].get('modified', datetime.min))[0]
-        group.selected_for_deletion = {i for i, _ in valid_files if i != newest_idx}
+        
+        if self.config.prefer_symlinks and self.config.enable_symlinks:
+            # Use symlink replacement
+            group.symlink_target_index = newest_idx
+            group.selected_for_symlink = {i for i, _ in valid_files if i != newest_idx}
+            group.selected_for_deletion.clear()
+        else:
+            # Use deletion
+            group.selected_for_deletion = {i for i, _ in valid_files if i != newest_idx}
     
     def _select_keep_oldest(self, group: DuplicateGroup) -> None:
         """Keep the oldest file, delete others"""
@@ -1371,26 +1583,53 @@ class IntegratedDuplicateManager:
             self._select_keep_newest(group)
     
     def _select_keep_smart(self, group: DuplicateGroup) -> None:
-        """Keep the best file based on intelligent analysis"""
+        """Keep the best file based on intelligent analysis with symlink safety consideration"""
         try:
+            # Get symlink safety analysis first
+            safety_analysis = self.symlink_analyzer.analyze_group_safety(group)
+            
+            # Get traditional smart recommendation
             recommendation_engine = SmartRecommendationEngine()
             recommendation = recommendation_engine.analyze_duplicate_group(group)
             
             best_file = recommendation['recommended_file']
             confidence = recommendation['confidence']
             reasoning = recommendation['reasoning']
-            
-            # Apply recommendation
             keep_idx = best_file['index']
-            group.selected_for_deletion = {i for i in range(group.count) if i != keep_idx}
             
-            # Show what was decided
-            kept_file = group.paths[keep_idx].name
-            deleted_count = len(group.selected_for_deletion)
-            
-            print(f"    Smart AI recommendation: Keep '{kept_file}' (Confidence: {confidence:.0f}%)")
-            print(f"    Reasoning: {reasoning}")
-            print(f"    Will delete {deleted_count} copies")
+            # Determine operation strategy based on safety analysis
+            if (safety_analysis['recommended_strategy'] == 'symlink' and 
+                self.config.enable_symlinks and 
+                safety_analysis['confidence'] > 70.0):
+                
+                # Use symlink replacement
+                group.symlink_target_index = keep_idx
+                group.selected_for_symlink = {i for i in range(group.count) if i != keep_idx}
+                group.selected_for_deletion.clear()
+                
+                # Show what was decided
+                kept_file = group.paths[keep_idx].name
+                symlink_count = len(group.selected_for_symlink)
+                
+                print(f"    🔗 Smart symlink recommendation: Keep '{kept_file}' as target")
+                print(f"    File reasoning: {reasoning}")
+                print(f"    Symlink reasoning: {safety_analysis['reasoning'][0] if safety_analysis['reasoning'] else 'Safe for symlinks'}")
+                print(f"    Will create {symlink_count} symlinks (Safety: {safety_analysis['confidence']:.0f}%)")
+                
+            else:
+                # Use traditional deletion
+                group.selected_for_deletion = {i for i in range(group.count) if i != keep_idx}
+                group.selected_for_symlink.clear()
+                group.symlink_target_index = None
+                
+                # Show what was decided
+                kept_file = group.paths[keep_idx].name
+                deleted_count = len(group.selected_for_deletion)
+                
+                strategy_reason = "deletion safer" if safety_analysis['recommended_strategy'] == 'deletion' else "symlinks disabled"
+                print(f"    🗑️ Smart deletion recommendation: Keep '{kept_file}' ({strategy_reason})")
+                print(f"    Reasoning: {reasoning}")
+                print(f"    Will delete {deleted_count} copies (Confidence: {confidence:.0f}%)")
             
         except Exception as e:
             logger.warning(f"Smart selection failed: {e}")
@@ -1417,6 +1656,17 @@ class IntegratedDuplicateManager:
             
             print(f"\\n🎯 RECOMMENDED: Keep [{best_file['index']+1}] (Confidence: {confidence:.0f}%)")
             print(f"   Reason: {reasoning}")
+            
+            # Add symlink safety analysis if enabled
+            if self.config.enable_symlinks:
+                safety_analysis = self.symlink_analyzer.analyze_group_safety(group)
+                strategy_icon = "🔗" if safety_analysis['recommended_strategy'] == 'symlink' else "🗑️"
+                strategy_name = "SYMLINK" if safety_analysis['recommended_strategy'] == 'symlink' else "DELETE"
+                
+                print(f"\\n{strategy_icon} SAFETY RECOMMENDATION: {strategy_name} duplicates (Confidence: {safety_analysis['confidence']:.0f}%)")
+                if safety_analysis['reasoning']:
+                    print(f"   Safety reason: {safety_analysis['reasoning'][0]}")
+            
             print()
             
             # Display all files with scores
@@ -1696,6 +1946,101 @@ class IntegratedDuplicateManager:
             print(f"Space freed: {format_size(total_savings)}")
             if self.config.delete_backup and self.deleted_files:
                 print(f"Backup directory: {self.backup_dir}")
+        
+        return len(errors) == 0
+    
+    def execute_symlinks(self, groups: List[DuplicateGroup]) -> bool:
+        """Execute symlink replacement operations"""
+        if not self.config.enable_symlinks or not self.symlink_manager:
+            print("Error: Symlink operations not enabled or supported.")
+            return False
+        
+        total_symlinks = sum(len(g.selected_for_symlink) for g in groups)
+        total_savings = sum(g.potential_symlink_savings for g in groups)
+        
+        if total_symlinks == 0:
+            print("\\nNo files selected for symlink replacement.")
+            return True
+        
+        # Show preview
+        print(f"\\n{'='*60}")
+        print(f"SYMLINK {'PREVIEW' if self.config.symlink_dry_run or self.config.delete_dry_run else 'EXECUTION'}")
+        print(f"{'='*60}")
+        print(f"Files to symlink: {total_symlinks}")
+        print(f"Space to save: {format_size(total_savings)}")
+        print(f"Mode: {'DRY RUN' if self.config.symlink_dry_run or self.config.delete_dry_run else 'LIVE'}")
+        
+        if self.config.delete_confirm and not (self.config.symlink_dry_run or self.config.delete_dry_run):
+            print(f"\\n🔗 About to create {total_symlinks} symlinks!")
+            confirm = input("Type 'SYMLINK' to confirm: ")
+            if confirm != 'SYMLINK':
+                print("Symlink operation cancelled.")
+                return False
+        
+        # Execute symlinks
+        operation_id = f"batch_{int(time.time())}"
+        symlink_count = 0
+        errors = []
+        
+        for group in groups:
+            if not group.selected_for_symlink or group.symlink_target_index is None:
+                continue
+            
+            target_path = group.paths[group.symlink_target_index]
+            
+            # Verify target still exists
+            if not target_path.exists():
+                error_msg = f"Target file no longer exists: {target_path}"
+                errors.append(error_msg)
+                print(f"  ERROR: {error_msg}")
+                continue
+            
+            for file_idx in sorted(group.selected_for_symlink):
+                source_path = group.paths[file_idx]
+                
+                try:
+                    if self.config.symlink_dry_run or self.config.delete_dry_run:
+                        print(f"  [DRY RUN] Would create symlink: {source_path} -> {target_path}")
+                    else:
+                        print(f"  Creating symlink: {source_path} -> {target_path}")
+                        
+                        # Safety check
+                        if not source_path.exists():
+                            print(f"    Warning: Source file no longer exists")
+                            continue
+                        
+                        # Create the symlink
+                        operation = self.symlink_manager.create_symlink(
+                            source_path, target_path, operation_id
+                        )
+                        
+                        if not operation.success:
+                            error_msg = f"Failed to create symlink {source_path}: {operation.error_message}"
+                            errors.append(error_msg)
+                            print(f"    ERROR: {error_msg}")
+                            continue
+                    
+                    symlink_count += 1
+                    
+                except Exception as e:
+                    error_msg = f"Failed to create symlink {source_path}: {e}"
+                    errors.append(error_msg)
+                    print(f"  ERROR: {error_msg}")
+        
+        # Summary
+        print(f"\\n{'='*60}")
+        print(f"SYMLINK SUMMARY")
+        print(f"{'='*60}")
+        print(f"Symlinks created: {symlink_count}")
+        print(f"Errors: {len(errors)}")
+        
+        if not (self.config.symlink_dry_run or self.config.delete_dry_run) and self.symlink_manager:
+            stats = self.symlink_manager.get_statistics()
+            print(f"Space saved: {format_size(stats['total_space_saved'])}")
+            print(f"Success rate: {stats['success_rate']:.1%}")
+            
+            if hasattr(self.symlink_manager, 'log_path'):
+                print(f"Operation log: {self.symlink_manager.log_path}")
         
         return len(errors) == 0
 
@@ -2558,6 +2903,16 @@ def main():
     parser.add_argument("--no-delete-backup", action="store_true", help="Skip backup when deleting")
     parser.add_argument("--no-delete-confirm", action="store_true", help="Skip confirmation prompts")
     
+    # Symlink Replacement System
+    parser.add_argument("--enable-symlinks", action="store_true", help="Enable symlink replacement for duplicates")
+    parser.add_argument("--prefer-symlinks", action="store_true", help="Prefer symlinks over deletion for all strategies")
+    parser.add_argument("--symlink-strategy", 
+                       choices=["replace_duplicates", "hybrid", "large_files_only"],
+                       default="replace_duplicates",
+                       help="Symlink replacement strategy (default: replace_duplicates)")
+    parser.add_argument("--symlink-dry-run", action="store_true", help="Preview symlink operations without creating them")
+    parser.add_argument("--rollback-symlinks", action="store_true", help="Rollback previous symlink operations")
+    
     # Similarity Detection System
     parser.add_argument("--enable-similarity", action="store_true", help="Enable similarity detection for near-duplicates")
     parser.add_argument("--image-similarity", action="store_true", help="Enable perceptual image similarity detection") 
@@ -2631,6 +2986,13 @@ def main():
         delete_max_files=args.delete_max_files,
         delete_backup=not args.no_delete_backup,
         delete_confirm=not args.no_delete_confirm,
+        
+        # Symlink replacement system
+        enable_symlinks=args.enable_symlinks,
+        prefer_symlinks=args.prefer_symlinks,
+        symlink_strategy=args.symlink_strategy if hasattr(args, 'symlink_strategy') else "replace_duplicates",
+        symlink_dry_run=args.symlink_dry_run if hasattr(args, 'symlink_dry_run') else False,
+        rollback_symlinks=args.rollback_symlinks if hasattr(args, 'rollback_symlinks') else False,
         
         # Similarity detection system  
         enable_similarity=args.enable_similarity or args.image_similarity or args.audio_similarity or args.document_similarity,
@@ -2780,8 +3142,17 @@ def main():
                     for group in groups:
                         duplicate_manager.apply_deletion_strategy(group)
                     
-                    # Execute deletions
-                    duplicate_manager.execute_deletions(groups)
+                    # Separate groups by operation type
+                    groups_with_deletions = [g for g in groups if g.selected_for_deletion]
+                    groups_with_symlinks = [g for g in groups if hasattr(g, 'selected_for_symlink') and g.selected_for_symlink]
+                    
+                    # Execute deletions first
+                    if groups_with_deletions:
+                        duplicate_manager.execute_deletions(groups_with_deletions)
+                    
+                    # Execute symlinks if enabled
+                    if groups_with_symlinks and config.enable_symlinks:
+                        duplicate_manager.execute_symlinks(groups_with_symlinks)
                 else:
                     print("No duplicate groups found.")
             except Exception as e:
