@@ -60,6 +60,390 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------------------
+# Intelligent Decision System
+# ---------------------------
+
+@dataclass
+class FileContext:
+    """Context information for intelligent decision making"""
+    related_files: List[Path] = field(default_factory=list)
+    group_size: int = 0
+    total_wasted_space: int = 0
+    file_types: Set[str] = field(default_factory=set)
+    common_directories: Set[str] = field(default_factory=set)
+    access_patterns: Dict[str, datetime] = field(default_factory=dict)
+
+@dataclass
+class FileScore:
+    """Detailed scoring breakdown for a file"""
+    total_score: float = 0.0
+    path_quality: float = 0.0
+    file_integrity: float = 0.0
+    usage_context: float = 0.0
+    metadata_quality: float = 0.0
+    reasoning: List[str] = field(default_factory=list)
+
+class IntelligentFileRanker:
+    """Advanced file ranking system using multi-factor analysis"""
+    
+    def __init__(self):
+        # Scoring weights (should sum to 1.0)
+        self.weights = {
+            'path_quality': 0.40,
+            'file_integrity': 0.25, 
+            'usage_context': 0.20,
+            'metadata_quality': 0.15
+        }
+        
+        # Path quality indicators
+        self.path_indicators = {
+            # Negative indicators (messy/temporary locations)
+            'negative': {
+                r'/[Dd]esktop/': -20,
+                r'/[Dd]ownloads?/': -30,
+                r'/[Tt]emp/': -50,
+                r'/[Tt]mp/': -50,
+                r'\\[Dd]esktop\\': -20,
+                r'\\[Dd]ownloads?\\': -30,
+                r'\\[Tt]emp\\': -50,
+                r'\\[Tt]mp\\': -50,
+                r'/[Rr]ecycle': -40,
+                r'\\[Rr]ecycle': -40,
+                r'/\.': -25,  # Hidden directories
+                r'backup': -15,
+                r'old': -10,
+            },
+            # Positive indicators (organized locations)
+            'positive': {
+                r'/[Dd]ocuments/': 20,
+                r'/[Pp]rojects?/': 30,
+                r'/[Ww]ork/': 25,
+                r'\\[Dd]ocuments\\': 20,
+                r'\\[Pp]rojects?\\': 30,
+                r'\\[Ww]ork\\': 25,
+                r'/[0-9]{4}/': 15,  # Year folders
+                r'\\[0-9]{4}\\': 15,
+                r'/src/': 20,
+                r'/source/': 20,
+                r'\\src\\': 20,
+                r'\\source\\': 20,
+            }
+        }
+    
+    def calculate_file_score(self, file_path: Path, file_info: Dict, context: FileContext) -> FileScore:
+        """Calculate comprehensive score for a file"""
+        score = FileScore()
+        
+        # Calculate individual component scores
+        score.path_quality = self._score_path_quality(file_path, score.reasoning)
+        score.file_integrity = self._score_file_integrity(file_path, file_info, score.reasoning)
+        score.usage_context = self._score_usage_context(file_path, file_info, context, score.reasoning)
+        score.metadata_quality = self._score_metadata_quality(file_path, file_info, score.reasoning)
+        
+        # Calculate weighted total
+        score.total_score = (
+            score.path_quality * self.weights['path_quality'] +
+            score.file_integrity * self.weights['file_integrity'] +
+            score.usage_context * self.weights['usage_context'] +
+            score.metadata_quality * self.weights['metadata_quality']
+        )
+        
+        return score
+    
+    def _score_path_quality(self, file_path: Path, reasoning: List[str]) -> float:
+        """Score based on path organization and location quality"""
+        score = 50.0  # Base score
+        path_str = str(file_path).replace('\\', '/')
+        
+        # Check negative indicators
+        for pattern, penalty in self.path_indicators['negative'].items():
+            if re.search(pattern, path_str, re.IGNORECASE):
+                score += penalty
+                reasoning.append(f"Path penalty: {pattern.strip('/')} location ({penalty:+d})")
+        
+        # Check positive indicators  
+        for pattern, bonus in self.path_indicators['positive'].items():
+            if re.search(pattern, path_str, re.IGNORECASE):
+                score += bonus
+                reasoning.append(f"Path bonus: {pattern.strip('/')} location (+{bonus})")
+        
+        # Directory depth analysis (deeper usually = more organized)
+        depth = len(file_path.parts)
+        if depth > 3:
+            depth_bonus = min((depth - 3) * 3, 15)
+            score += depth_bonus
+            reasoning.append(f"Organized depth: {depth} levels (+{depth_bonus})")
+        elif depth <= 2:
+            score -= 10
+            reasoning.append(f"Shallow depth: {depth} levels (-10)")
+        
+        # Filename quality
+        filename = file_path.name
+        if re.match(r'^[a-zA-Z0-9_\-\s\.]+$', filename):
+            score += 5
+            reasoning.append("Clean filename format (+5)")
+        
+        # Path length (very long paths can be problematic)
+        if len(str(file_path)) > 200:
+            score -= 10
+            reasoning.append("Very long path (-10)")
+        
+        return max(0, min(100, score))
+    
+    def _score_file_integrity(self, file_path: Path, file_info: Dict, reasoning: List[str]) -> float:
+        """Score based on file accessibility and integrity"""
+        score = 50.0  # Base score
+        
+        # File accessibility
+        if file_info.get('exists', True):
+            score += 20
+            reasoning.append("File exists (+20)")
+        else:
+            score -= 50
+            reasoning.append("File missing (-50)")
+            return max(0, score)
+        
+        # File readability
+        try:
+            if file_path.is_file() and os.access(file_path, os.R_OK):
+                score += 15
+                reasoning.append("File readable (+15)")
+            else:
+                score -= 20
+                reasoning.append("File access issues (-20)")
+        except:
+            score -= 15
+            reasoning.append("File access error (-15)")
+        
+        # Size reasonableness (files that are too small might be corrupted)
+        size = file_info.get('size', 0)
+        if size > 0:
+            score += 10
+            reasoning.append("Valid file size (+10)")
+        else:
+            score -= 25
+            reasoning.append("Zero/invalid size (-25)")
+        
+        # Modification time reasonableness
+        mtime = file_info.get('mtime')
+        if mtime:
+            # Files modified in the future are suspicious
+            if mtime > time.time():
+                score -= 20
+                reasoning.append("Future modification time (-20)")
+            else:
+                score += 5
+                reasoning.append("Valid modification time (+5)")
+        
+        return max(0, min(100, score))
+    
+    def _score_usage_context(self, file_path: Path, file_info: Dict, context: FileContext, reasoning: List[str]) -> float:
+        """Score based on usage patterns and context"""
+        score = 50.0  # Base score
+        
+        # Recent access patterns (if available)
+        try:
+            access_time = file_path.stat().st_atime
+            days_since_access = (time.time() - access_time) / (24 * 3600)
+            
+            if days_since_access < 7:
+                score += 25
+                reasoning.append("Recently accessed (+25)")
+            elif days_since_access < 30:
+                score += 15
+                reasoning.append("Accessed this month (+15)")
+            elif days_since_access < 90:
+                score += 5
+                reasoning.append("Accessed recently (+5)")
+            else:
+                score -= 5
+                reasoning.append("Not accessed recently (-5)")
+        except:
+            pass  # Access time not available
+        
+        # File relationships (part of a collection)
+        if len(context.related_files) > 2:
+            score += 15
+            reasoning.append(f"Part of {len(context.related_files)} file collection (+15)")
+        
+        # Cloud sync detection
+        path_str = str(file_path).lower()
+        cloud_patterns = ['onedrive', 'dropbox', 'google drive', 'icloud']
+        for pattern in cloud_patterns:
+            if pattern in path_str:
+                score += 15
+                reasoning.append(f"In cloud sync folder: {pattern} (+15)")
+                break
+        
+        # Backup location detection
+        backup_patterns = ['backup', 'bak', 'old', 'archive']
+        for pattern in backup_patterns:
+            if pattern in path_str:
+                score -= 15
+                reasoning.append(f"In backup location: {pattern} (-15)")
+                break
+        
+        # Project context (files in same directory as code/project files)
+        parent_dir = file_path.parent
+        try:
+            sibling_files = list(parent_dir.glob('*'))
+            project_indicators = ['.git', '.project', 'package.json', 'requirements.txt', '*.sln']
+            for indicator in project_indicators:
+                if any(f.name == indicator or f.match(indicator) for f in sibling_files):
+                    score += 20
+                    reasoning.append(f"In project directory (+20)")
+                    break
+        except:
+            pass
+        
+        return max(0, min(100, score))
+    
+    def _score_metadata_quality(self, file_path: Path, file_info: Dict, reasoning: List[str]) -> float:
+        """Score based on file metadata and naming conventions"""
+        score = 50.0  # Base score
+        
+        # Original file detection (avoid copies)
+        filename = file_path.name.lower()
+        name_without_ext = file_path.stem.lower()
+        
+        # Heavy penalties for obvious copies
+        copy_patterns = [
+            (r'\(\d+\)', -30, "numbered copy"),
+            (r'[-_\s]+copy[-_\s]*', -25, "named copy"),
+            (r'[-_\s]+\d+$', -15, "numbered suffix"),
+            (r'duplicate', -20, "duplicate marker"),
+            (r'backup', -15, "backup marker"),
+            (r'[-_]bak$', -20, "backup extension"),
+        ]
+        
+        for pattern, penalty, description in copy_patterns:
+            if re.search(pattern, name_without_ext):
+                score += penalty
+                reasoning.append(f"Copy indicator: {description} ({penalty:+d})")
+        
+        # Bonuses for original-looking names
+        if not re.search(r'\d+$', name_without_ext):
+            score += 15
+            reasoning.append("No trailing numbers (+15)")
+        
+        # Simple, clean naming
+        if re.match(r'^[a-zA-Z0-9_\-\s]+$', name_without_ext):
+            score += 10
+            reasoning.append("Clean naming convention (+10)")
+        
+        # Reasonable filename length
+        if 5 <= len(file_path.stem) <= 50:
+            score += 5
+            reasoning.append("Reasonable filename length (+5)")
+        elif len(file_path.stem) > 100:
+            score -= 10
+            reasoning.append("Very long filename (-10)")
+        
+        # Extension consistency
+        extension = file_path.suffix.lower()
+        if extension in ['.pdf', '.docx', '.xlsx', '.pptx', '.jpg', '.png', '.mp4', '.mp3']:
+            score += 5
+            reasoning.append("Standard file format (+5)")
+        
+        return max(0, min(100, score))
+
+class SmartRecommendationEngine:
+    """Generates intelligent recommendations for duplicate file handling"""
+    
+    def __init__(self):
+        self.ranker = IntelligentFileRanker()
+    
+    def analyze_duplicate_group(self, duplicate_group) -> Dict:
+        """Analyze a group of duplicates and generate smart recommendations"""
+        
+        # Build context
+        context = self._build_context(duplicate_group)
+        
+        # Score each file
+        scored_files = []
+        for i in range(duplicate_group.count):
+            file_path = duplicate_group.paths[i]
+            file_info = duplicate_group.get_file_info(i)
+            
+            score = self.ranker.calculate_file_score(file_path, file_info, context)
+            scored_files.append({
+                'index': i,
+                'path': file_path,
+                'info': file_info,
+                'score': score
+            })
+        
+        # Sort by total score (highest first)
+        scored_files.sort(key=lambda x: x['score'].total_score, reverse=True)
+        
+        # Calculate confidence
+        confidence = self._calculate_confidence(scored_files)
+        
+        # Generate recommendation
+        best_file = scored_files[0]
+        
+        return {
+            'recommended_file': best_file,
+            'confidence': confidence,
+            'all_scores': scored_files,
+            'reasoning': self._generate_reasoning(best_file, scored_files),
+            'alternative_suggestions': scored_files[1:3] if len(scored_files) > 1 else []
+        }
+    
+    def _build_context(self, duplicate_group) -> FileContext:
+        """Build context information for the duplicate group"""
+        context = FileContext()
+        
+        context.group_size = duplicate_group.count
+        context.total_wasted_space = (duplicate_group.count - 1) * duplicate_group.size
+        
+        # Collect file extensions
+        for i in range(duplicate_group.count):
+            file_path = duplicate_group.paths[i]
+            context.file_types.add(file_path.suffix.lower())
+            context.common_directories.add(str(file_path.parent))
+        
+        # Find related files in same directories
+        for directory in context.common_directories:
+            try:
+                related_files = list(Path(directory).glob('*'))
+                context.related_files.extend(related_files[:10])  # Limit to avoid memory issues
+            except:
+                pass
+        
+        return context
+    
+    def _calculate_confidence(self, scored_files: List[Dict]) -> float:
+        """Calculate confidence in the recommendation"""
+        if len(scored_files) < 2:
+            return 50.0
+        
+        best_score = scored_files[0]['score'].total_score
+        second_best_score = scored_files[1]['score'].total_score
+        
+        # Confidence based on score gap
+        score_gap = best_score - second_best_score
+        confidence = min(95.0, max(50.0, 50 + score_gap))
+        
+        return confidence
+    
+    def _generate_reasoning(self, best_file: Dict, all_files: List[Dict]) -> str:
+        """Generate human-readable reasoning for the recommendation"""
+        score = best_file['score']
+        reasoning_parts = []
+        
+        # Highlight top reasons
+        top_reasons = sorted(score.reasoning, key=lambda x: abs(float(re.search(r'[+-]\d+', x).group())), reverse=True)[:3]
+        
+        for reason in top_reasons:
+            reasoning_parts.append(reason)
+        
+        total_score = score.total_score
+        reasoning_parts.append(f"Overall score: {total_score:.1f}/100")
+        
+        return " | ".join(reasoning_parts)
+
+# ---------------------------
 # Configuration
 # ---------------------------
 
@@ -119,6 +503,7 @@ class Config:
     cache_cleanup_hours: int = 24
     rebuild_cache: bool = False
     clear_cache: bool = False
+    cache_stats: bool = False
     
     # GPU Acceleration System
     enable_gpu: bool = False
@@ -892,6 +1277,8 @@ class IntegratedDuplicateManager:
             self._select_keep_priority(group)
         elif strategy == "keep_original":
             self._select_keep_original(group)
+        elif strategy == "keep_smart":
+            self._select_keep_smart(group)
         elif strategy == "interactive":
             self._interactive_selection(group)
         elif strategy == "skip":
@@ -983,47 +1370,167 @@ class IntegratedDuplicateManager:
             print(f"    Could not detect original file, falling back to keep newest")
             self._select_keep_newest(group)
     
+    def _select_keep_smart(self, group: DuplicateGroup) -> None:
+        """Keep the best file based on intelligent analysis"""
+        try:
+            recommendation_engine = SmartRecommendationEngine()
+            recommendation = recommendation_engine.analyze_duplicate_group(group)
+            
+            best_file = recommendation['recommended_file']
+            confidence = recommendation['confidence']
+            reasoning = recommendation['reasoning']
+            
+            # Apply recommendation
+            keep_idx = best_file['index']
+            group.selected_for_deletion = {i for i in range(group.count) if i != keep_idx}
+            
+            # Show what was decided
+            kept_file = group.paths[keep_idx].name
+            deleted_count = len(group.selected_for_deletion)
+            
+            print(f"    Smart AI recommendation: Keep '{kept_file}' (Confidence: {confidence:.0f}%)")
+            print(f"    Reasoning: {reasoning}")
+            print(f"    Will delete {deleted_count} copies")
+            
+        except Exception as e:
+            logger.warning(f"Smart selection failed: {e}")
+            print(f"    Smart selection failed, falling back to keep newest")
+            self._select_keep_newest(group)
+    
     def _interactive_selection(self, group: DuplicateGroup) -> None:
-        """Interactive selection for a group"""
-        print(f"\\n{'='*60}")
-        print(f"Duplicate Group")
-        print(f"{'='*60}")
-        print(f"Files: {group.count} copies")
-        print(f"Size: {format_size(group.size)} each")
-        print(f"Total wasted: {format_size(group.wasted_space)}")
-        print(f"Hash: {group.hash_val[:16]}...")
-        print()
+        """Intelligent interactive selection for a group using AI recommendations"""
+        # Get smart recommendation
+        try:
+            recommendation_engine = SmartRecommendationEngine()
+            recommendation = recommendation_engine.analyze_duplicate_group(group)
+            
+            # Display header with recommendation
+            print(f"\\n{'='*70}")
+            print(f"Duplicate Group - SMART RECOMMENDATION")
+            print(f"{'='*70}")
+            print(f"Files: {group.count} copies | Size: {format_size(group.size)} each | Total wasted: {format_size(group.wasted_space)}")
+            
+            # Show recommendation with confidence
+            best_file = recommendation['recommended_file']
+            confidence = recommendation['confidence']
+            reasoning = recommendation['reasoning']
+            
+            print(f"\\n🎯 RECOMMENDED: Keep [{best_file['index']+1}] (Confidence: {confidence:.0f}%)")
+            print(f"   Reason: {reasoning}")
+            print()
+            
+            # Display all files with scores
+            for file_data in recommendation['all_scores']:
+                i = file_data['index']
+                path = file_data['path']
+                score = file_data['score']
+                info = group.get_file_info(i)
+                
+                # Highlight recommended file
+                marker = "⭐" if i == best_file['index'] else "  "
+                status = "MISSING" if not info['exists'] else ""
+                
+                print(f"{marker} [{i+1}] {path} {status}")
+                
+                if info['exists']:
+                    # Show key metrics
+                    try:
+                        access_time = path.stat().st_atime
+                        days_ago = (time.time() - access_time) / (24 * 3600)
+                        if days_ago < 1:
+                            access_str = "today"
+                        elif days_ago < 7:
+                            access_str = f"{int(days_ago)} days ago"
+                        elif days_ago < 30:
+                            access_str = f"{int(days_ago/7)} weeks ago"
+                        else:
+                            access_str = "long ago"
+                    except:
+                        access_str = "unknown"
+                    
+                    # Determine location type
+                    path_str = str(path).lower()
+                    if any(x in path_str for x in ['projects', 'work', 'dev']):
+                        location_type = "📁 Project folder"
+                    elif any(x in path_str for x in ['documents']):
+                        location_type = "📁 Documents"
+                    elif any(x in path_str for x in ['downloads']):
+                        location_type = "📁 Downloads"
+                    elif any(x in path_str for x in ['desktop']):
+                        location_type = "📁 Desktop"
+                    elif any(x in path_str for x in ['onedrive', 'dropbox', 'google drive']):
+                        location_type = "☁️ Cloud sync"
+                    else:
+                        location_type = "📁 Standard location"
+                    
+                    print(f"      {location_type}  🕒 Last accessed: {access_str}")
+                    print(f"      📊 Score: {score.total_score:.0f}/100")
+                
+                print()
+            
+        except Exception as e:
+            # Fallback to basic display if smart recommendation fails
+            logger.warning(f"Smart recommendation failed: {e}")
+            print(f"\\n{'='*60}")
+            print(f"Duplicate Group")
+            print(f"{'='*60}")
+            print(f"Files: {group.count} copies")
+            print(f"Size: {format_size(group.size)} each")
+            print(f"Total wasted: {format_size(group.wasted_space)}")
+            print()
+            
+            for i, path in enumerate(group.paths):
+                info = group.get_file_info(i)
+                status = "MISSING" if not info['exists'] else ""
+                print(f"  [{i+1}] {info['path']} {status}")
+                if info['exists'] and 'modified' in info:
+                    print(f"      Modified: {info['modified'].strftime('%Y-%m-%d %H:%M:%S')}")
         
-        for i, path in enumerate(group.paths):
-            info = group.get_file_info(i)
-            status = "MISSING" if not info['exists'] else ""
-            print(f"  [{i+1}] {info['path']} {status}")
-            if info['exists'] and 'modified' in info:
-                print(f"      Modified: {info['modified'].strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        # Show original detection
-        original_idx = detect_original_file(group.paths)
-        if original_idx is not None:
-            print(f"\\n  💡 Detected likely original: [{original_idx+1}] {group.paths[original_idx].name}")
-        
+        # Interactive menu
         while True:
-            print(f"\\nOptions:")
-            print(f"  n) Keep newest (auto-select)")
-            print(f"  o) Keep oldest (auto-select)")
-            print(f"  p) Keep in priority dirs (auto-select)")
-            if original_idx is not None:
-                print(f"  r) Keep original (auto-select detected original)")
-            print(f"  m) Manual selection")
-            print(f"  s) Skip this group")
-            print(f"  q) Quit")
+            print(f"Options:")
+            try:
+                if 'recommendation' in locals():
+                    print(f"  ✅ a) Accept recommendation (keep [{best_file['index']+1}])")
+                    if len(recommendation['alternative_suggestions']) > 0:
+                        alt = recommendation['alternative_suggestions'][0]
+                        print(f"  🔄 r) Reverse (keep [{alt['index']+1}] instead)")
+                    print(f"  📊 s) Show detailed scoring breakdown")
+            except:
+                pass
+            
+            print(f"  ⚙️  n) Keep newest (auto-select)")
+            print(f"  ⚙️  o) Keep oldest (auto-select)")
+            print(f"  ⚙️  p) Keep in priority dirs (auto-select)")
+            print(f"  ⚙️  t) Keep original pattern (auto-select)")
+            print(f"  ✋ m) Manual selection")
+            print(f"  ⏭️  k) Skip this group")
+            print(f"  🚪 q) Quit")
             
             choice = input("\\nChoice: ").lower().strip()
             
             if choice == 'q':
                 sys.exit(0)
-            elif choice == 's':
+            elif choice == 'k':
                 group.selected_for_deletion.clear()
                 break
+            elif choice == 'a' and 'recommendation' in locals():
+                # Accept smart recommendation
+                keep_idx = best_file['index']
+                group.selected_for_deletion = {i for i in range(group.count) if i != keep_idx}
+                print(f"    Smart recommendation accepted. Keeping [{keep_idx+1}]")
+                break
+            elif choice == 'r' and 'recommendation' in locals() and len(recommendation['alternative_suggestions']) > 0:
+                # Use alternative recommendation
+                alt = recommendation['alternative_suggestions'][0]
+                keep_idx = alt['index']
+                group.selected_for_deletion = {i for i in range(group.count) if i != keep_idx}
+                print(f"    Alternative choice accepted. Keeping [{keep_idx+1}]")
+                break
+            elif choice == 's' and 'recommendation' in locals():
+                # Show detailed scoring breakdown
+                self._show_detailed_scores(recommendation['all_scores'])
+                continue
             elif choice == 'n':
                 self._select_keep_newest(group)
                 break
@@ -1033,7 +1540,7 @@ class IntegratedDuplicateManager:
             elif choice == 'p':
                 self._select_keep_priority(group)
                 break
-            elif choice == 'r' and original_idx is not None:
+            elif choice == 't':
                 self._select_keep_original(group)
                 break
             elif choice == 'm':
@@ -1041,6 +1548,31 @@ class IntegratedDuplicateManager:
                     break
             else:
                 print("Invalid choice. Please try again.")
+    
+    def _show_detailed_scores(self, scored_files: List[Dict]) -> None:
+        """Show detailed scoring breakdown for each file"""
+        print(f"\\n{'='*70}")
+        print(f"DETAILED SCORING BREAKDOWN")
+        print(f"{'='*70}")
+        
+        for file_data in scored_files:
+            path = file_data['path']
+            score = file_data['score']
+            
+            print(f"\\n[{file_data['index']+1}] {path.name}")
+            print(f"    Path: {path}")
+            print(f"    Total Score: {score.total_score:.1f}/100")
+            print(f"    ├─ Path Quality: {score.path_quality:.1f}/100 (weight: 40%)")
+            print(f"    ├─ File Integrity: {score.file_integrity:.1f}/100 (weight: 25%)")
+            print(f"    ├─ Usage Context: {score.usage_context:.1f}/100 (weight: 20%)")
+            print(f"    └─ Metadata Quality: {score.metadata_quality:.1f}/100 (weight: 15%)")
+            
+            if score.reasoning:
+                print(f"    Reasoning:")
+                for reason in score.reasoning[:5]:  # Show top 5 reasons
+                    print(f"      • {reason}")
+        
+        input("\\nPress Enter to continue...")
     
     def _manual_selection(self, group: DuplicateGroup) -> bool:
         """Manual file selection within a group"""
@@ -1680,8 +2212,8 @@ class UltimateScanner:
         )
         
         # Display cache statistics if caching is enabled
-        if self.cache_manager and self.config.enable_cache:
-            cache_stats = self.cache_manager.get_cache_stats()
+        if self.cache and self.config.enable_cache:
+            cache_stats = self.cache.get_cache_stats()
             if 'error' not in cache_stats:
                 hit_rate = cache_stats.get('hit_rate_percent', 0)
                 entry_count = cache_stats.get('entry_count', 0)
@@ -2018,9 +2550,9 @@ def main():
     # Integrated Deletion System
     parser.add_argument("--no-delete", action="store_true", help="Disable integrated deletion (scan only)")
     parser.add_argument("--delete-strategy", 
-                       choices=["interactive", "keep_newest", "keep_oldest", "keep_first", "keep_priority", "keep_original", "skip"],
+                       choices=["interactive", "keep_newest", "keep_oldest", "keep_first", "keep_priority", "keep_original", "keep_smart", "skip"],
                        default="interactive",
-                       help="Deletion strategy (default: interactive)")
+                       help="Deletion strategy: interactive, keep_smart (AI), keep_newest, keep_oldest, keep_priority, keep_original, skip (default: interactive)")
     parser.add_argument("--delete-live", action="store_true", help="Actually delete files (default is dry-run)")
     parser.add_argument("--delete-max-files", type=int, default=1000, help="Max files to delete in one operation")
     parser.add_argument("--no-delete-backup", action="store_true", help="Skip backup when deleting")
@@ -2115,6 +2647,7 @@ def main():
         cache_max_size_mb=args.cache_max_size,
         rebuild_cache=args.rebuild_cache,
         clear_cache=args.clear_cache,
+        cache_stats=args.cache_stats,
         
         # GPU acceleration system
         enable_gpu=args.enable_gpu,
@@ -2230,18 +2763,10 @@ def main():
         if config.show_scanned:
             display_scanned_summary(scanner.db)
         
-        # Launch interactive cleaner if requested
-        # Legacy compatibility
+        # Legacy compatibility - deprecated, use integrated system instead
         if config.interactive_clean and stats.duplicate_sets > 0:
-            print(f"\nLaunching legacy interactive cleaner...")
-            try:
-                from interactive_cleaner import InteractiveCleaner
-                cleaner = InteractiveCleaner(config.db_path, dry_run=True, auto_apply_saved=True)
-                cleaner.run()
-            except ImportError:
-                print("Error: interactive_cleaner.py not found")
-            except Exception as e:
-                print(f"Error launching cleaner: {e}")
+            print(f"\nLegacy interactive cleaner is deprecated. Using integrated deletion system instead.")
+            config.delete_strategy = "interactive"  # Force interactive mode
         
         # Integrated deletion processing
         if config.delete_duplicates and stats.duplicate_sets > 0:
