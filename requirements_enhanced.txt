@@ -1,0 +1,118 @@
+# Ultimate File Scanner Enhanced Requirements
+# Core dependencies for similarity detection, GPU acceleration, and advanced features
+
+# ===== CORE REQUIREMENTS (existing) =====
+# No external dependencies beyond Python standard library for basic functionality
+
+# ===== PHASE 1 ENHANCEMENTS =====
+
+# Image Similarity Detection
+Pillow>=10.0.0                 # Image processing and format support
+ImageHash>=4.3.1               # Perceptual hashing algorithms (pHash, aHash, dHash, wHash)
+
+# Audio Similarity Detection  
+librosa>=0.10.0                # Audio analysis and feature extraction
+numba>=0.56.0                  # Required by librosa for performance
+soundfile>=0.12.1              # Audio file I/O support
+resampy>=0.4.0                 # Audio resampling for librosa
+
+# Document Similarity Detection
+python-Levenshtein>=0.21.0     # Fast string similarity calculations
+PyPDF2>=3.0.0                  # PDF text extraction
+python-docx>=0.8.11            # Microsoft Word document processing
+chardet>=5.0.0                 # Character encoding detection for text files
+
+# GPU Acceleration (Optional - install based on hardware)
+# CUDA Support (NVIDIA GPUs)
+pycuda>=2022.2.2               # CUDA Python bindings
+# OR OpenCL Support (AMD/Intel/NVIDIA GPUs)  
+pyopencl>=2023.1.4             # OpenCL Python bindings
+
+# Scientific Computing (required by audio/GPU modules)
+numpy>=1.24.0                  # Numerical computing foundation
+scipy>=1.10.0                  # Scientific computing utilities
+
+# ===== PHASE 2 PLANNED DEPENDENCIES =====
+# (Commented out - will be enabled when implementing Phase 2)
+
+# Machine Learning & AI
+# scikit-learn>=1.3.0          # ML algorithms for pattern recognition
+# pandas>=2.0.0                # Data analysis and manipulation
+# tensorflow>=2.13.0           # Deep learning framework (alternative: pytorch)
+
+# Advanced Text Processing
+# nltk>=3.8.0                  # Natural language processing
+# spacy>=3.6.0                 # Advanced NLP and text analysis
+
+# Web Interface (Phase 3)
+# flask>=2.3.0                 # Web framework
+# flask-socketio>=5.3.0        # Real-time web communication
+# gunicorn>=21.0.0             # WSGI HTTP server
+
+# Enterprise Features (Phase 4)
+# redis>=4.6.0                 # Caching and session storage
+# celery>=5.3.0                # Distributed task queue
+# psycopg2>=2.9.0              # PostgreSQL adapter (enterprise database)
+
+# Cloud Integration (Phase 4)
+# google-auth>=2.22.0          # Google Drive API authentication
+# google-api-python-client>=2.95.0  # Google Drive API client
+# boto3>=1.28.0                # AWS S3 integration
+# dropbox>=11.36.0             # Dropbox API integration
+
+# ===== DEVELOPMENT DEPENDENCIES =====
+# (Optional - for development and testing)
+
+# Testing Framework
+pytest>=7.4.0                  # Testing framework
+pytest-cov>=4.1.0             # Code coverage reporting
+pytest-benchmark>=4.0.0       # Performance benchmarking
+
+# Code Quality
+black>=23.7.0                  # Code formatting
+flake8>=6.0.0                  # Linting and style checking
+mypy>=1.5.0                    # Static type checking
+
+# Documentation
+sphinx>=7.1.0                  # Documentation generation
+sphinx-rtd-theme>=1.3.0       # Read the Docs theme
+
+# ===== INSTALLATION NOTES =====
+
+# Basic installation (no similarity detection):
+# pip install -r requirements_basic.txt  # (just standard library)
+
+# Full Phase 1 installation:
+# pip install -r requirements_enhanced.txt
+
+# GPU acceleration requires specific drivers:
+# NVIDIA: Install CUDA Toolkit 11.8+ and cuDNN
+# AMD/Intel: Install OpenCL drivers
+# Apple Silicon: Use PyTorch Metal backend (future enhancement)
+
+# Audio processing may require system libraries:
+# Ubuntu/Debian: sudo apt-get install libsndfile1 ffmpeg
+# macOS: brew install libsndfile ffmpeg  
+# Windows: Libraries included with pip packages
+
+# For enterprise deployment, consider:
+# Docker containers with pre-built dependencies
+# Virtual environments for isolation
+# Separate requirements files for different deployment scenarios
+
+# ===== VERSION COMPATIBILITY =====
+# Python 3.8+ required for all features
+# Python 3.9+ recommended for best performance
+# Python 3.11+ for latest performance optimizations
+
+# Platform support:
+# Windows 10/11 (x64)
+# macOS 11+ (Intel and Apple Silicon)
+# Linux (Ubuntu 20.04+, CentOS 8+, Debian 11+)
+
+# Memory requirements by feature:
+# Basic scanning: 1GB RAM minimum
+# Image similarity: 2GB RAM recommended  
+# Audio similarity: 4GB RAM recommended
+# GPU acceleration: 6GB+ VRAM recommended
+# Large datasets (>1TB): 16GB+ RAM recommended
