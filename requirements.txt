@@ -1,0 +1,9 @@
+# TurboDedup Core Requirements
+# The basic scanner works with Python standard library only - no external dependencies required!
+
+# Optional: For better performance with xxhash algorithm
+# xxhash>=3.0.0
+
+# Note: Enhanced features require additional dependencies
+# Install with: pip install turbodedup[all]
+# Or see requirements_enhanced.txt for manual installation

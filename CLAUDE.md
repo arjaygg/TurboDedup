@@ -8,15 +8,42 @@ This is **TurboDedup** - a high-performance Python application for detecting dup
 
 ## Core Architecture
 
+### Package Structure
+
+```
+TurboDedup/
+├── turbodedup/                    # Main package
+│   ├── __init__.py               # Package initialization
+│   ├── cli/                      # Command line interface
+│   │   ├── __init__.py
+│   │   └── main.py              # Main CLI application
+│   ├── core/                     # Core functionality
+│   │   ├── __init__.py
+│   │   ├── cache_manager.py     # Smart caching system
+│   │   ├── gpu_accelerator.py   # GPU acceleration
+│   │   └── similarity_detector.py # Similarity detection
+│   └── utils/                    # Utility modules
+│       ├── __init__.py
+│       ├── auto-config.py       # Auto-configuration tool
+│       └── interactive_cleaner.py # Legacy cleaner
+├── turbodedup.py                 # Standalone entry point
+├── setup.py                      # Package setup (legacy)
+├── pyproject.toml               # Modern Python project config
+├── requirements.txt             # Core requirements
+├── requirements_enhanced.txt     # Enhanced features
+├── requirements-dev.txt         # Development requirements
+└── MANIFEST.in                  # Package manifest
+```
+
 ### Main Components
 
-- **turbo_dedup.py**: Main TurboDedup application with three-phase optimization
+- **turbodedup/cli/main.py**: Main TurboDedup application with three-phase optimization
   - Phase 1: File discovery and cataloging
   - Phase 2: Partial hash computation for large files (head + tail segments)
   - Phase 3: Full hash computation only for potential duplicates
   - Phase 4: Optional byte-by-byte verification
 
-- **auto-config.py**: System detection and configuration optimization tool
+- **turbodedup/utils/auto-config.py**: System detection and configuration optimization tool
   - Detects storage type (SSD/HDD), RAM, CPU cores, network drives
   - Generates optimal scanner settings based on system characteristics
   - Provides performance explanations and alternative configurations
@@ -70,25 +97,25 @@ Uses SQLite with WAL mode for concurrent access:
 ### Basic Usage
 ```bash
 # Scan and interactively manage duplicates (default behavior)
-python3 turbo_dedup.py
+turbodedup
 
 # Scan specific path with interactive deletion
-python3 turbo_dedup.py --path /path/to/scan
+turbodedup --path /path/to/scan
 
 # Scan multiple paths
-python3 turbo_dedup.py --path /path/one /path/two
+turbodedup --path /path/one /path/two
 
 # Auto-delete keeping newest files (dry-run by default)
-python3 turbo_dedup.py --delete-strategy keep_newest
+turbodedup --delete-strategy keep_newest
 
 # Actually delete files (live mode)
-python3 turbo_dedup.py --delete-strategy keep_newest --delete-live
+turbodedup --delete-strategy keep_newest --delete-live
 
 # Scan only (no deletion processing)
-python3 turbo_dedup.py --no-delete
+turbodedup --no-delete
 
 # Export results to CSV
-python3 turbo_dedup.py --no-delete --export csv --export-path duplicates.csv
+turbodedup --no-delete --export csv --export-path duplicates.csv
 ```
 
 ### Auto-Configuration
@@ -103,36 +130,36 @@ python3 auto-config.py
 ### Performance Tuning
 ```bash
 # High-performance SSD scan with GPU acceleration and caching
-python3 turbo_dedup.py --workers 16 --chunk-size 4MB --algorithm xxhash --enable-gpu --enable-cache
+turbodedup --workers 16 --chunk-size 4MB --algorithm xxhash --enable-gpu --enable-cache
 
 # Network drive scan (conservative settings)
-python3 turbo_dedup.py --workers 4 --chunk-size 256KB --retry-attempts 5 --enable-cache
+turbodedup --workers 4 --chunk-size 256KB --retry-attempts 5 --enable-cache
 
 # Memory-constrained system
-python3 turbo_dedup.py --workers 4 --chunk-size 1MB --batch-size 500 --enable-cache
+turbodedup --workers 4 --chunk-size 1MB --batch-size 500 --enable-cache
 
 # Maximum performance configuration
-python3 turbo_dedup.py --workers 16 --chunk-size 4MB --algorithm xxhash --enable-gpu --enable-cache --gpu-backend cuda
+turbodedup --workers 16 --chunk-size 4MB --algorithm xxhash --enable-gpu --enable-cache --gpu-backend cuda
 ```
 
 ### Deletion Strategies
 ```bash
 # Interactive mode (default) - manually choose what to delete
-python3 turbo_dedup.py --delete-strategy interactive
+turbodedup --delete-strategy interactive
 
 # Auto-strategies
-python3 turbo_dedup.py --delete-strategy keep_newest    # Keep most recent files
-python3 turbo_dedup.py --delete-strategy keep_oldest    # Keep oldest files  
-python3 turbo_dedup.py --delete-strategy keep_first     # Keep alphabetically first
-python3 turbo_dedup.py --delete-strategy keep_priority  # Keep files in priority dirs
-python3 turbo_dedup.py --delete-strategy keep_original  # Keep original files (smart detection)
-python3 turbo_dedup.py --delete-strategy skip          # Find but don't delete
+turbodedup --delete-strategy keep_newest    # Keep most recent files
+turbodedup --delete-strategy keep_oldest    # Keep oldest files  
+turbodedup --delete-strategy keep_first     # Keep alphabetically first
+turbodedup --delete-strategy keep_priority  # Keep files in priority dirs
+turbodedup --delete-strategy keep_original  # Keep original files (smart detection)
+turbodedup --delete-strategy skip          # Find but don't delete
 
 # Live deletion with confirmations disabled
-python3 turbo_dedup.py --delete-strategy keep_newest --delete-live --no-delete-confirm
+turbodedup --delete-strategy keep_newest --delete-live --no-delete-confirm
 
 # Disable backups for permanent deletion
-python3 turbo_dedup.py --delete-live --no-delete-backup
+turbodedup --delete-live --no-delete-backup
 ```
 
 ### Smart Caching System (Phase 1 Enhancement)
@@ -140,19 +167,19 @@ The persistent cache dramatically improves performance for repeat scans by stori
 
 ```bash
 # Enable caching (automatic for subsequent scans)
-python3 turbo_dedup.py --enable-cache
+turbodedup --enable-cache
 
 # View detailed cache statistics
-python3 turbo_dedup.py --cache-stats
+turbodedup --cache-stats
 
 # Clear cache and start fresh
-python3 turbo_dedup.py --clear-cache
+turbodedup --clear-cache
 
 # Use custom cache location
-python3 turbo_dedup.py --enable-cache --cache-path /path/to/cache.db
+turbodedup --enable-cache --cache-path /path/to/cache.db
 
 # Combine with other optimizations
-python3 turbo_dedup.py --enable-cache --enable-gpu --workers 16
+turbodedup --enable-cache --enable-gpu --workers 16
 ```
 
 **Cache Performance Benefits:**
@@ -166,20 +193,20 @@ Optional GPU acceleration provides significant performance improvements for hash
 
 ```bash
 # Enable GPU acceleration (auto-detects best backend)
-python3 turbo_dedup.py --enable-gpu
+turbodedup --enable-gpu
 
 # Force specific GPU backend
-python3 turbo_dedup.py --enable-gpu --gpu-backend cuda
-python3 turbo_dedup.py --enable-gpu --gpu-backend opencl
+turbodedup --enable-gpu --gpu-backend cuda
+turbodedup --enable-gpu --gpu-backend opencl
 
 # Check GPU capabilities
-python3 turbo_dedup.py --gpu-info
+turbodedup --gpu-info
 
 # Combine GPU with caching for maximum performance
-python3 turbo_dedup.py --enable-gpu --enable-cache --workers 16
+turbodedup --enable-gpu --enable-cache --workers 16
 
 # Benchmark GPU vs CPU performance
-python3 turbo_dedup.py --enable-gpu --benchmark-gpu
+turbodedup --enable-gpu --benchmark-gpu
 ```
 
 **GPU Requirements:**
@@ -205,7 +232,7 @@ The `keep_original` strategy intelligently detects and preserves original files 
 
 ```bash
 # Perfect for downloaded files and copies
-python3 turbo_dedup.py --delete-strategy keep_original
+turbodedup --delete-strategy keep_original
 
 # Patterns detected:
 # Image.png (kept) vs Image (1).png, Image (2).png (deleted)
@@ -219,19 +246,19 @@ Beyond exact duplicate detection, the scanner can now find similar files using a
 
 ```bash
 # Enable all similarity detection types
-python3 turbo_dedup.py --enable-similarity
+turbodedup --enable-similarity
 
 # Image similarity (perceptual hashing for different formats/compression)
-python3 turbo_dedup.py --image-similarity --image-sensitivity high
+turbodedup --image-similarity --image-sensitivity high
 
 # Audio similarity (acoustic fingerprinting across formats/bitrates)
-python3 turbo_dedup.py --audio-similarity --audio-sensitivity medium
+turbodedup --audio-similarity --audio-sensitivity medium
 
 # Document similarity (fuzzy text matching for similar content)
-python3 turbo_dedup.py --document-similarity --document-sensitivity low
+turbodedup --document-similarity --document-sensitivity low
 
 # Combine with exact duplicates and deletion strategies
-python3 turbo_dedup.py --image-similarity --delete-strategy keep_original --delete-live
+turbodedup --image-similarity --delete-strategy keep_original --delete-live
 ```
 
 ## Installation & Dependencies
@@ -241,7 +268,7 @@ The basic scanner works with Python standard library only:
 ```bash
 git clone <repository>
 cd File_Scanner
-python3 turbo_dedup.py --help  # Ready to use!
+turbodedup --help  # Ready to use!
 ```
 
 ### Enhanced Features Installation
@@ -265,37 +292,37 @@ pip install -r requirements_enhanced.txt  # If available
 ### Advanced Options
 ```bash
 # Reset database and start fresh
-python3 turbo_dedup.py --reset
+turbodedup --reset
 
 # Include only specific file types
-python3 turbo_dedup.py --include .mp4 .mkv .avi
+turbodedup --include .mp4 .mkv .avi
 
 # Exclude additional directories
-python3 turbo_dedup.py --exclude-dir .git node_modules __pycache__
+turbodedup --exclude-dir .git node_modules __pycache__
 
 # Verify duplicates with byte-by-byte comparison
-python3 turbo_dedup.py --verify
+turbodedup --verify
 
 # Scan only mode for analysis
-python3 turbo_dedup.py --no-delete --quiet --export csv
+turbodedup --no-delete --quiet --export csv
 
 # Advanced caching options
-python3 turbo_dedup.py --enable-cache --cache-max-size 2000  # 2GB cache limit
-python3 turbo_dedup.py --cache-export cache_backup.json     # Export cache
+turbodedup --enable-cache --cache-max-size 2000  # 2GB cache limit
+turbodedup --cache-export cache_backup.json     # Export cache
 
 # GPU diagnostics and benchmarking
-python3 turbo_dedup.py --gpu-info --gpu-benchmark           # Detailed GPU info
-python3 turbo_dedup.py --enable-gpu --gpu-memory-limit 4096 # 4GB GPU memory limit
+turbodedup --gpu-info --gpu-benchmark           # Detailed GPU info
+turbodedup --enable-gpu --gpu-memory-limit 4096 # 4GB GPU memory limit
 ```
 
 ### Legacy Interactive Cleaner (Deprecated)
 ```bash
 # The old separate interactive cleaner is deprecated in favor of integrated deletion
 # Use --interactive-clean for legacy compatibility
-python3 turbo_dedup.py --interactive-clean
+turbodedup --interactive-clean
 
 # Modern equivalent using integrated system:
-python3 turbo_dedup.py --delete-strategy interactive
+turbodedup --delete-strategy interactive
 ```
 
 ## Configuration Guidelines
@@ -355,18 +382,18 @@ python3 turbo_dedup.py --delete-strategy interactive
 The project doesn't include formal unit tests. To test functionality:
 ```bash
 # Test basic functionality on small directory
-python3 turbo_dedup.py --path /small/test/directory --min-size 1MB
+turbodedup --path /small/test/directory --min-size 1MB
 
 # Test auto-configuration
 python3 auto-config.py /test/path
 
 # Test GPU acceleration
-python3 turbo_dedup.py --gpu-info
-python3 turbo_dedup.py --path /small/test/directory --enable-gpu --benchmark-gpu
+turbodedup --gpu-info
+turbodedup --path /small/test/directory --enable-gpu --benchmark-gpu
 
 # Test caching system
-python3 turbo_dedup.py --path /small/test/directory --enable-cache
-python3 turbo_dedup.py --cache-stats
+turbodedup --path /small/test/directory --enable-cache
+turbodedup --cache-stats
 
 # Verify database integrity after scan
 sqlite3 file_scanner.db "SELECT COUNT(*) FROM files WHERE error IS NULL;"

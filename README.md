@@ -40,38 +40,51 @@ TurboDedup is the definitive file deduplication solution featuring intelligent t
 
 ## ⚡ Quick Start
 
-### Basic Installation (No Dependencies)
+### Installation Options
+
+#### Option 1: Package Installation (Recommended)
+```bash
+# Basic installation
+pip install turbodedup
+
+# With GPU acceleration
+pip install turbodedup[gpu]
+
+# With similarity detection
+pip install turbodedup[similarity]
+
+# Full installation with all features
+pip install turbodedup[all]
+```
+
+#### Option 2: Development Installation
 ```bash
 git clone https://github.com/arjaygg/TurboDedup.git
 cd TurboDedup
-python3 turbo_dedup.py --help
-```
 
-### Enhanced Features
-```bash
-# GPU acceleration (optional)
-pip install pycuda>=2022.2.2      # NVIDIA CUDA
-pip install pyopencl>=2023.1.4    # OpenCL (AMD/Intel/NVIDIA)
+# Basic usage (no installation required)
+python3 turbodedup.py --help
 
-# Similarity detection (optional)
-pip install Pillow>=10.0.0 ImageHash>=4.3.1  # Images
-pip install librosa>=0.10.0                   # Audio
-pip install python-Levenshtein>=0.21.0        # Documents
+# Install in development mode
+pip install -e .
 
-# All enhanced features
-pip install -r requirements_enhanced.txt
+# Install with all features for development
+pip install -e .[all,dev]
 ```
 
 ### Basic Usage
 ```bash
-# Scan current directory with all optimizations
-python3 turbo_dedup.py --enable-cache --enable-gpu
+# Using installed package
+turbodedup --enable-cache --enable-gpu
+
+# Using direct script (development)
+python3 turbodedup.py --enable-cache --enable-gpu
 
 # High-performance scan with smart deletion
-python3 turbo_dedup.py --path /data --enable-cache --enable-gpu --delete-strategy keep_newest --delete-live
+turbodedup --path /data --enable-cache --enable-gpu --delete-strategy keep_newest --delete-live
 
 # Find similar images with GPU acceleration
-python3 turbo_dedup.py --path /photos --image-similarity --enable-gpu --delete-strategy keep_original
+turbodedup --path /photos --image-similarity --enable-gpu --delete-strategy keep_original
 ```
 
 ## 🔧 Core Commands
@@ -79,37 +92,37 @@ python3 turbo_dedup.py --path /photos --image-similarity --enable-gpu --delete-s
 ### Performance Optimization
 ```bash
 # Maximum performance configuration
-python3 turbo_dedup.py --workers 16 --chunk-size 4MB --algorithm xxhash --enable-gpu --enable-cache
+turbodedup --workers 16 --chunk-size 4MB --algorithm xxhash --enable-gpu --enable-cache
 
 # Memory-constrained systems
-python3 turbo_dedup.py --workers 4 --chunk-size 1MB --enable-cache
+turbodedup --workers 4 --chunk-size 1MB --enable-cache
 
 # Network drives
-python3 turbo_dedup.py --workers 4 --chunk-size 256KB --retry-attempts 5 --enable-cache
+turbodedup --workers 4 --chunk-size 256KB --retry-attempts 5 --enable-cache
 ```
 
 ### Deletion Strategies
 ```bash
 # Interactive selection (default)
-python3 turbo_dedup.py --delete-strategy interactive
+turbodedup --delete-strategy interactive
 
 # Automatic strategies
-python3 turbo_dedup.py --delete-strategy keep_newest    # Keep most recent
-python3 turbo_dedup.py --delete-strategy keep_original  # Smart pattern recognition
-python3 turbo_dedup.py --delete-strategy keep_priority  # Priority directories
+turbodedup --delete-strategy keep_newest    # Keep most recent
+turbodedup --delete-strategy keep_original  # Smart pattern recognition
+turbodedup --delete-strategy keep_priority  # Priority directories
 ```
 
 ### System Management
 ```bash
 # Check GPU capabilities
-python3 turbo_dedup.py --gpu-info
+turbodedup --gpu-info
 
 # Cache statistics and management
-python3 turbo_dedup.py --cache-stats
-python3 turbo_dedup.py --clear-cache
+turbodedup --cache-stats
+turbodedup --clear-cache
 
 # Export results
-python3 turbo_dedup.py --export csv --export-path results.csv
+turbodedup --export csv --export-path results.csv
 ```
 
 ## 🎯 Use Cases
@@ -175,7 +188,7 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 git clone https://github.com/arjaygg/TurboDedup.git
 cd TurboDedup
 pip install -r requirements_enhanced.txt
-python3 turbo_dedup.py --gpu-info  # Test installation
+turbodedup --gpu-info  # Test installation
 ```
 
 ## 📄 License

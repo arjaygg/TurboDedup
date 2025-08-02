@@ -1,17 +1,45 @@
 # TurboDedup .gitignore
 
+# ===== TURBODEDUP SPECIFIC =====
 # Database files (scanner data)
 *.db
 *.db-wal
 *.db-shm
 file_scanner.db*
 file_cache.db*
+cache.db*
 
-# Python cache
+# TurboDedup output files
+duplicates.csv
+duplicates.json
+results.*
+export.*
+scanned_files.csv
+
+# Deletion logs and backups
+deletion_log_*.txt
+deletion_backup/
+
+# Test data and temporary files
+test_duplicates/
+test_files/
+test_data/
+benchmark_data/
+temp/
+tmp/
+command.txt
+
+# ===== PYTHON =====
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# C extensions
+*.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -25,76 +53,11 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
-
-# Virtual environments
-venv/
-env/
-ENV/
-.venv/
-.env/
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-desktop.ini
-
-# Test files and directories
-test_files/
-test_data/
-benchmark_data/
-temp/
-tmp/
-
-# Log files
-*.log
-logs/
-
-# Backup files
-*.bak
-*.backup
-*.old
-*.orig
-
-# Export files (unless specifically wanted)
-duplicates.csv
-duplicates.json
-results.*
-export.*
-
-# GPU compilation cache
-.nv_fatb/
-.nvidia/
-
-# Coverage reports
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-
-# Documentation build
-docs/_build/
-site/
 
 # PyInstaller
 *.manifest
@@ -105,11 +68,89 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage reports
+htmlcov/
 .tox/
 .nox/
 .coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
 .pytest_cache/
 cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
 
 # mypy
 .mypy_cache/
@@ -121,3 +162,122 @@ dmypy.json
 
 # pytype static type analyzer
 .pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# ===== IDE AND EDITORS =====
+# Visual Studio Code
+.vscode/
+.history/
+
+# PyCharm
+.idea/
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ===== OS SPECIFIC =====
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ===== GPU AND COMPUTE =====
+# CUDA compilation cache
+.nv_fatb/
+.nvidia/
+
+# OpenCL compilation cache
+.cl_cache/
+
+# ===== PERFORMANCE AND PROFILING =====
+# Profiling data
+*.prof
+*.profile
+profiling_output/
+
+# Benchmark results
+benchmark_results/
+performance_data/
+
+# Memory dumps
+*.dmp
+core.*
+
+# ===== LOGS AND MONITORING =====
+# Log files
+*.log
+logs/
+log/
+
+# Monitoring data
+metrics/
+traces/
+
+# ===== BACKUP AND TEMPORARY =====
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+*.tmp
+.backup/
+
+# Archive files (unless intentional)
+*.tar.gz
+*.zip
+*.7z
+*.rar
+
+# ===== SECURITY =====
+# API keys and secrets
+.env.local
+.env.production
+secrets.json
+config/secrets/
+*.key
+*.pem
+*.crt
